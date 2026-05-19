@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { Role, ColorStatus, WAEC_SUBJECTS } from '@/lib/types';
 import type { Student, Hotspot } from '@/lib/types';
-import { studentStore, metricsStore, hotspotStore, schoolStore } from '@/lib/storage';
+import { studentStore, metricsStore, hotspotStore, schoolStore, diaryStore, userStore } from '@/lib/storage';
+import type { User } from '@/lib/types';
 import { recomputeStudent } from '@/lib/calculations';
 import Navbar from '@/components/Navbar';
 
@@ -18,6 +19,7 @@ export default function SchoolDashboard() {
 
   const [students, setStudents] = useState<Student[]>([]);
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
+  const [teachers, setTeachers] = useState<User[]>([]);
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortKey>('readiness');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
@@ -44,7 +46,25 @@ export default function SchoolDashboard() {
     }
 
     setHotspots(hotspotStore.getBySchool(user.schoolId!));
+
+    if (user.role === Role.HEADTEACHER) {
+      setTeachers(userStore.getBySchool(user.schoolId!).filter((u) => u.role === Role.TEACHER));
+    }
   }, [user, isLoading, computed, router]);
+
+  function getTeacherCompliance(teacherId: string) {
+    const diaries = diaryStore.getByTeacher(teacherId);
+    const today = new Date().toDateString();
+    const submittedToday = diaries.some((d) => new Date(d.createdAt).toDateString() === today);
+    const last7 = diaries.filter((d) => {
+      const days = (Date.now() - new Date(d.createdAt).getTime()) / 86400000;
+      return days <= 7;
+    }).length;
+    const lastDate = diaries[0]?.createdAt
+      ? new Date(diaries[0].createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })
+      : 'Never';
+    return { submittedToday, last7, lastDate };
+  }
 
   function getAvgReadiness(studentId: string, subject?: string): number {
     const metrics = metricsStore.getByStudent(studentId);
@@ -139,6 +159,45 @@ export default function SchoolDashboard() {
                       }}
                     >
                       {h.severity}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Teacher Compliance — HeadTeacher only */}
+        {user?.role === Role.HEADTEACHER && teachers.length > 0 && (
+          <div className="card mb-6">
+            <h2 className="font-bold text-sm mb-4" style={{ color: 'var(--lagos-blue)' }}>
+              Teacher Compliance Tracker
+            </h2>
+            <div className="flex flex-col gap-2">
+              {teachers.map((teacher) => {
+                const { submittedToday, last7, lastDate } = getTeacherCompliance(teacher.id);
+                return (
+                  <div key={teacher.id} className="flex items-center gap-3 p-3 rounded-xl" style={{ background: 'var(--background)' }}>
+                    <div
+                      className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm shrink-0"
+                      style={{ background: 'var(--lagos-blue-light)', color: 'var(--lagos-blue)' }}
+                    >
+                      {teacher.name.charAt(0)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-sm">{teacher.name}</div>
+                      <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                        Last diary: {lastDate} · {last7} entries this week
+                      </div>
+                    </div>
+                    <span
+                      className="text-xs px-2 py-1 rounded-full font-bold shrink-0"
+                      style={{
+                        background: submittedToday ? 'var(--lagos-green-light)' : '#FEE2E2',
+                        color: submittedToday ? 'var(--lagos-green)' : 'var(--lagos-red)',
+                      }}
+                    >
+                      {submittedToday ? '✓ Today' : '✗ Pending'}
                     </span>
                   </div>
                 );

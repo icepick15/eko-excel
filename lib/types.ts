@@ -5,6 +5,7 @@ export enum Role {
   DISTRICT = 'district',
   MINISTRY = 'ministry',
   PARENT = 'parent',
+  STUDENT = 'student',
 }
 
 export enum BehavioralTrait {
@@ -29,6 +30,8 @@ export interface User {
   role: Role;
   schoolId?: string;
   districtId?: string;
+  studentId?: string;
+  childId?: string;
   createdAt: string;
 }
 
@@ -134,3 +137,37 @@ export const ACADEMIC_DOMAINS = [
   'Verbal-Creative',
   'Applied-Practical',
 ];
+
+// ============= Quiz =============
+export interface QuizQuestion {
+  id: string;
+  subject: string;
+  topicId: string;
+  question: string;
+  options: string[];
+  correctIndex: number;
+  difficulty: 'easy' | 'medium' | 'hard';
+}
+
+export interface QuizAttempt {
+  id: string;
+  studentId: string;
+  topicId: string;
+  subject: string;
+  score: number;
+  totalQuestions: number;
+  correctCount: number;
+  completedAt: string;
+}
+
+// ============= Career Streaming =============
+export type CareerPathway = 'Science' | 'Arts' | 'Commercial';
+
+export interface CareerRecommendation {
+  studentId: string;
+  pathway: CareerPathway;
+  confidence: number;
+  reasons: string[];
+  subjectScores: Record<string, number>;
+  computedAt: string;
+}

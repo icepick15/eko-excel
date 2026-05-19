@@ -11,6 +11,7 @@ const ROLE_LABELS: Record<Role, string> = {
   [Role.DISTRICT]: 'District Officer',
   [Role.MINISTRY]: 'Ministry Official',
   [Role.PARENT]: 'Parent',
+  [Role.STUDENT]: 'Student',
 };
 
 export default function Navbar() {
@@ -44,6 +45,12 @@ export default function Navbar() {
     }
     if (user!.role === Role.MINISTRY) {
       return [{ label: 'Ministry Overview', href: '/ministry' }];
+    }
+    if (user!.role === Role.STUDENT) {
+      return [{ label: 'My Dashboard', href: '/student' }];
+    }
+    if (user!.role === Role.PARENT) {
+      return [{ label: 'Weekly Report', href: '/parent' }];
     }
     return [];
   }

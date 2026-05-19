@@ -1,6 +1,6 @@
 import { ColorStatus, BehavioralTrait, WAEC_SUBJECTS, SUBJECT_TO_DOMAIN } from './types';
-import type { DiaryEntry, TopicSegment, ReadinessMetric, BrainMapProfile, Hotspot } from './types';
-import { diaryStore, topicStore, metricsStore, brainMapStore, hotspotStore } from './storage';
+import type { DiaryEntry, TopicSegment, ReadinessMetric, BrainMapProfile, Hotspot, CareerRecommendation, CareerPathway } from './types';
+import { diaryStore, topicStore, metricsStore, brainMapStore, hotspotStore, quizAttemptStore, careerStore } from './storage';
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
@@ -37,6 +37,19 @@ export function calculateReadiness(studentId: string, subject: string): Readines
     const ageInDays = (now - new Date(diary.createdAt).getTime()) / (1000 * 60 * 60 * 24);
     const recencyFactor = Math.pow(RECENCY_DECAY, ageInDays / 7);
 
+    totalWeightedScore += weight * normalizedScore * recencyFactor;
+    totalWeight += weight * recencyFactor;
+  }
+
+  // Also blend in quiz attempt scores for this subject (more direct than class-level diary)
+  const quizAttempts = quizAttemptStore.getByStudent(studentId).filter((a) => a.subject === subject);
+  for (const attempt of quizAttempts) {
+    const topic = topicMap.get(attempt.topicId);
+    if (!topic) continue;
+    const weight = topic.waecFrequency * 1.2;
+    const normalizedScore = attempt.score / 100;
+    const ageInDays = (now - new Date(attempt.completedAt).getTime()) / (1000 * 60 * 60 * 24);
+    const recencyFactor = Math.pow(RECENCY_DECAY, ageInDays / 7);
     totalWeightedScore += weight * normalizedScore * recencyFactor;
     totalWeight += weight * recencyFactor;
   }
@@ -183,9 +196,59 @@ export function detectHotspots(studentId: string): Hotspot[] {
   return newHotspots;
 }
 
+// ============= Career Streaming =============
+export function computeCareerRecommendation(studentId: string): CareerRecommendation {
+  const metrics = metricsStore.getByStudent(studentId);
+  const brainMap = brainMapStore.getByStudent(studentId);
+
+  const getScore = (subject: string) =>
+    metrics.find((m) => m.subject === subject)?.readinessScore ?? 0;
+
+  const mathScore = getScore('Mathematics');
+  const englishScore = getScore('English');
+  const physicsScore = getScore('Physics');
+  const chemScore = getScore('Chemistry');
+  const bioScore = getScore('Biology');
+
+  const scienceRating = mathScore * 0.35 + physicsScore * 0.30 + chemScore * 0.20 + bioScore * 0.15;
+  const artsRating = englishScore * 0.50 + mathScore * 0.20 + (brainMap ? brainMap.behavioralTraits['collaboration'] * 30 : 0) * 0.30;
+  const commercialRating = mathScore * 0.35 + englishScore * 0.35 + (brainMap ? brainMap.academicScore / 75 * 100 : 50) * 0.30;
+
+  const ratings: Record<CareerPathway, number> = {
+    Science: scienceRating,
+    Arts: artsRating,
+    Commercial: commercialRating,
+  };
+  const pathway = (Object.entries(ratings).sort((a, b) => b[1] - a[1])[0][0]) as CareerPathway;
+  const total = Object.values(ratings).reduce((a, b) => a + b, 0);
+  const confidence = Math.min(95, Math.max(50, Math.round((ratings[pathway] / (total / 3)) * 65)));
+
+  const reasons: string[] = [];
+  if (pathway === 'Science') {
+    if (mathScore >= 55) reasons.push(`Mathematics: ${mathScore.toFixed(0)}% — strong quantitative foundation`);
+    if (physicsScore >= 50) reasons.push(`Physics: ${physicsScore.toFixed(0)}% — spatial-mechanical aptitude`);
+    if (chemScore >= 50) reasons.push(`Chemistry: ${chemScore.toFixed(0)}% — applied science readiness`);
+  } else if (pathway === 'Arts') {
+    if (englishScore >= 55) reasons.push(`English: ${englishScore.toFixed(0)}% — verbal-creative strength`);
+    reasons.push(`Highest engagement in language and humanities topics`);
+    if (brainMap && brainMap.behavioralTraits['collaboration'] > 0.6) reasons.push('Strong collaboration and communication traits');
+  } else {
+    if (mathScore >= 50) reasons.push(`Mathematics: ${mathScore.toFixed(0)}% — adequate numeracy`);
+    if (englishScore >= 50) reasons.push(`English: ${englishScore.toFixed(0)}% — good communication skills`);
+    reasons.push('Balanced analytical and verbal profile suited for business studies');
+  }
+
+  return careerStore.save({
+    studentId, pathway, confidence, reasons,
+    subjectScores: { Mathematics: mathScore, English: englishScore, Physics: physicsScore, Chemistry: chemScore, Biology: bioScore },
+    computedAt: new Date().toISOString(),
+  });
+}
+
 // ============= Full recompute for a student =============
 export function recomputeStudent(studentId: string): void {
   WAEC_SUBJECTS.forEach((subject) => calculateReadiness(studentId, subject));
   calculateBrainMap(studentId);
   detectHotspots(studentId);
+  computeCareerRecommendation(studentId);
 }

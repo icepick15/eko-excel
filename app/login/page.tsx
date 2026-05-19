@@ -5,11 +5,14 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { Role } from '@/lib/types';
 
+
 const DEMO_ACCOUNTS = [
   { phone: '08012345678', name: 'Mrs. Adaeze Okonkwo', role: 'Teacher' },
   { phone: '08034567890', name: 'Mr. Emmanuel Chukwu', role: 'Head Teacher' },
   { phone: '08045678901', name: 'Dr. Fatima Sule', role: 'District Officer' },
   { phone: '08056789012', name: 'Hon. Gbenga Adewale', role: 'Ministry Official' },
+  { phone: '08067890123', name: 'Abiodun Fashola', role: 'Student (SS1)' },
+  { phone: '08089012345', name: 'Mr. Emeka Fashola', role: 'Parent' },
 ];
 
 export default function LoginPage() {
@@ -27,6 +30,8 @@ export default function LoginPage() {
       else if (user.role === Role.HEADTEACHER) router.replace('/school');
       else if (user.role === Role.DISTRICT) router.replace('/district');
       else if (user.role === Role.MINISTRY) router.replace('/ministry');
+      else if (user.role === Role.STUDENT) router.replace('/student');
+      else if (user.role === Role.PARENT) router.replace('/parent');
     }
   }, [user, isLoading, router]);
 

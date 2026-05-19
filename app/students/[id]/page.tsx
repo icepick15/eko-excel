@@ -5,7 +5,8 @@ import { useRouter, useParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { WAEC_SUBJECTS, BEHAVIORAL_TRAIT_LABELS, BehavioralTrait } from '@/lib/types';
 import type { Student, ReadinessMetric, BrainMapProfile, Hotspot, DiaryEntry } from '@/lib/types';
-import { studentStore, metricsStore, brainMapStore, hotspotStore, diaryStore, topicStore } from '@/lib/storage';
+import { studentStore, metricsStore, brainMapStore, hotspotStore, diaryStore, topicStore, careerStore } from '@/lib/storage';
+import type { CareerRecommendation } from '@/lib/types';
 import { recomputeStudent } from '@/lib/calculations';
 import Navbar from '@/components/Navbar';
 import ReadinessBadge from '@/components/ReadinessBadge';
@@ -36,7 +37,8 @@ export default function StudentProfilePage() {
   const [brainMap, setBrainMap] = useState<BrainMapProfile | null>(null);
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
   const [diaries, setDiaries] = useState<DiaryEntry[]>([]);
-  const [activeTab, setActiveTab] = useState<'overview' | 'brainmap' | 'history'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'brainmap' | 'history' | 'career'>('overview');
+  const [career, setCareer] = useState<CareerRecommendation | null>(null);
 
   useEffect(() => {
     if (isLoading) return;
@@ -52,6 +54,7 @@ export default function StudentProfilePage() {
     setBrainMap(brainMapStore.getByStudent(studentId) ?? null);
     setHotspots(hotspotStore.getByStudent(studentId));
     setDiaries(diaryStore.getByStudent(studentId));
+    setCareer(careerStore.getByStudent(studentId) ?? null);
   }, [user, isLoading, studentId, router]);
 
   if (!student) {
@@ -129,7 +132,7 @@ export default function StudentProfilePage() {
 
         {/* Tabs */}
         <div className="flex gap-1 mb-6 p-1 rounded-xl" style={{ background: 'var(--border)' }}>
-          {(['overview', 'brainmap', 'history'] as const).map((tab) => (
+          {(['overview', 'brainmap', 'history', 'career'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -140,7 +143,7 @@ export default function StudentProfilePage() {
                 boxShadow: activeTab === tab ? '0 1px 4px rgba(0,0,0,0.1)' : 'none',
               }}
             >
-              {tab === 'overview' ? 'WAEC Readiness' : tab === 'brainmap' ? 'Brain Map' : 'Diary History'}
+              {tab === 'overview' ? 'WAEC Readiness' : tab === 'brainmap' ? 'Brain Map' : tab === 'history' ? 'Diary History' : 'Career Path'}
             </button>
           ))}
         </div>
@@ -256,6 +259,119 @@ export default function StudentProfilePage() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Career Path Tab */}
+        {activeTab === 'career' && (
+          <div>
+            {career ? (
+              <div className="flex flex-col gap-5">
+                {/* Pathway banner */}
+                <div
+                  className="rounded-2xl p-6 flex flex-col sm:flex-row items-start sm:items-center gap-5"
+                  style={{
+                    background: career.pathway === 'Science' ? 'var(--lagos-blue)' : career.pathway === 'Arts' ? 'var(--lagos-green)' : 'var(--lagos-gold)',
+                    color: 'white',
+                  }}
+                >
+                  <div className="text-5xl shrink-0">
+                    {career.pathway === 'Science' ? '🔬' : career.pathway === 'Arts' ? '🎨' : '💼'}
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-sm font-medium opacity-80 mb-1">Recommended Pathway</div>
+                    <div className="text-3xl font-black mb-1">{career.pathway}</div>
+                    <div className="text-sm opacity-80">
+                      {career.pathway === 'Science' ? 'Engineering, Medicine, Technology, Sciences' : career.pathway === 'Arts' ? 'Law, Journalism, Education, Languages' : 'Accounting, Business, Economics, Administration'}
+                    </div>
+                  </div>
+                  <div
+                    className="px-4 py-2 rounded-xl text-center shrink-0"
+                    style={{ background: 'rgba(255,255,255,0.2)' }}
+                  >
+                    <div className="text-3xl font-black">{career.confidence}%</div>
+                    <div className="text-xs opacity-80">confidence</div>
+                  </div>
+                </div>
+
+                {/* Reasoning */}
+                <div className="card">
+                  <h3 className="font-bold text-sm mb-3" style={{ color: 'var(--lagos-blue)' }}>Why this pathway?</h3>
+                  <div className="flex flex-col gap-2">
+                    {career.reasons.map((reason, i) => (
+                      <div key={i} className="flex items-start gap-2 text-sm">
+                        <span className="shrink-0 mt-0.5" style={{ color: 'var(--lagos-green)' }}>✓</span>
+                        <span>{reason}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Pathway comparison */}
+                <div className="card">
+                  <h3 className="font-bold text-sm mb-4" style={{ color: 'var(--lagos-blue)' }}>Pathway Comparison</h3>
+                  {(['Science', 'Arts', 'Commercial'] as const).map((pathway) => {
+                    const isTop = pathway === career.pathway;
+                    const relevantSubjects: Record<string, string[]> = {
+                      Science: ['Mathematics', 'Physics', 'Chemistry'],
+                      Arts: ['English', 'Mathematics'],
+                      Commercial: ['Mathematics', 'English'],
+                    };
+                    const avgScore = relevantSubjects[pathway].reduce((sum, subj) => sum + (career.subjectScores[subj] ?? 0), 0) / relevantSubjects[pathway].length;
+                    return (
+                      <div key={pathway} className="flex items-center gap-3 mb-3">
+                        <div className="text-sm font-semibold w-24 shrink-0" style={{ color: isTop ? 'var(--lagos-blue)' : 'var(--text-muted)' }}>
+                          {isTop && '★ '}{pathway}
+                        </div>
+                        <div className="progress-bar flex-1">
+                          <div
+                            className="progress-bar-fill"
+                            style={{
+                              width: `${avgScore}%`,
+                              background: isTop ? 'var(--lagos-blue)' : 'var(--border)',
+                            }}
+                          />
+                        </div>
+                        <div className="text-xs font-bold w-8 text-right shrink-0" style={{ color: isTop ? 'var(--lagos-blue)' : 'var(--text-muted)' }}>
+                          {avgScore.toFixed(0)}%
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Subject scores */}
+                <div className="card">
+                  <h3 className="font-bold text-sm mb-3" style={{ color: 'var(--lagos-blue)' }}>Subject Score Breakdown</h3>
+                  <div className="flex flex-col gap-2">
+                    {Object.entries(career.subjectScores).map(([subject, score]) => {
+                      const sc = score >= 75 ? 'green' : score >= 55 ? 'yellow' : 'red';
+                      const barColor = sc === 'green' ? 'var(--lagos-green)' : sc === 'yellow' ? 'var(--lagos-gold)' : 'var(--lagos-red)';
+                      return (
+                        <div key={subject}>
+                          <div className="flex justify-between text-xs mb-1">
+                            <span className="font-medium">{subject}</span>
+                            <span className="font-bold" style={{ color: barColor }}>{score.toFixed(0)}%</span>
+                          </div>
+                          <div className="progress-bar">
+                            <div className="progress-bar-fill" style={{ width: `${score}%`, background: barColor }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-4 text-xs" style={{ color: 'var(--text-muted)' }}>
+                    Computed: {new Date(career.computedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="card text-center py-10" style={{ color: 'var(--text-muted)' }}>
+                <div className="text-3xl mb-2">🎓</div>
+                <div className="text-sm font-medium">No career data yet</div>
+                <div className="text-xs mt-1">Submit more diary entries to build the career recommendation.</div>
+              </div>
+            )}
           </div>
         )}
 

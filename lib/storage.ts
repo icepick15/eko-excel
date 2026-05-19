@@ -1,6 +1,7 @@
 import type {
   User, District, School, Student, TopicSegment,
   DiaryEntry, ReadinessMetric, BrainMapProfile, Hotspot,
+  QuizQuestion, QuizAttempt, CareerRecommendation,
 } from './types';
 
 // Storage keys
@@ -166,4 +167,56 @@ export const hotspotStore = {
 export const seedStore = {
   isSeeded: () => localStorage.getItem(KEYS.seeded) === 'true',
   markSeeded: () => localStorage.setItem(KEYS.seeded, 'true'),
+};
+
+// ============= Users =============
+export const userStore = {
+  getAll: () => get<User>(KEYS.users),
+  getBySchool: (schoolId: string) => get<User>(KEYS.users).filter((u) => u.schoolId === schoolId),
+  addMany: (newUsers: User[]) => {
+    const existing = get<User>(KEYS.users);
+    const ids = new Set(existing.map((u) => u.id));
+    const toAdd = newUsers.filter((u) => !ids.has(u.id));
+    if (toAdd.length > 0) set(KEYS.users, [...existing, ...toAdd]);
+  },
+};
+
+// ============= Quiz Questions =============
+export const quizQuestionStore = {
+  getAll: () => get<QuizQuestion>('eko_quiz_questions'),
+  getByTopic: (topicId: string) => get<QuizQuestion>('eko_quiz_questions').filter((q) => q.topicId === topicId),
+  getBySubject: (subject: string) => get<QuizQuestion>('eko_quiz_questions').filter((q) => q.subject === subject),
+  saveMany: (questions: QuizQuestion[]) => {
+    const existing = get<QuizQuestion>('eko_quiz_questions');
+    const ids = new Set(existing.map((q) => q.id));
+    const toAdd = questions.filter((q) => !ids.has(q.id));
+    if (toAdd.length > 0) set('eko_quiz_questions', [...existing, ...toAdd]);
+  },
+};
+
+// ============= Quiz Attempts =============
+export const quizAttemptStore = {
+  getByStudent: (studentId: string) =>
+    get<QuizAttempt>('eko_quiz_attempts')
+      .filter((a) => a.studentId === studentId)
+      .sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime()),
+  getByStudentAndTopic: (studentId: string, topicId: string) =>
+    get<QuizAttempt>('eko_quiz_attempts')
+      .filter((a) => a.studentId === studentId && a.topicId === topicId)
+      .sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime()),
+  save: (a: QuizAttempt) => upsert('eko_quiz_attempts', a),
+};
+
+// ============= Career Recommendations =============
+export const careerStore = {
+  getByStudent: (studentId: string) =>
+    get<CareerRecommendation>('eko_career').find((c) => c.studentId === studentId),
+  save: (c: CareerRecommendation) => {
+    const all = get<CareerRecommendation>('eko_career');
+    const idx = all.findIndex((x) => x.studentId === c.studentId);
+    if (idx >= 0) all[idx] = c;
+    else all.push(c);
+    set('eko_career', all);
+    return c;
+  },
 };

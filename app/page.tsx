@@ -19,6 +19,8 @@ export default function Home() {
     else if (user.role === Role.HEADTEACHER) router.replace('/school');
     else if (user.role === Role.DISTRICT) router.replace('/district');
     else if (user.role === Role.MINISTRY) router.replace('/ministry');
+    else if (user.role === Role.STUDENT) router.replace('/student');
+    else if (user.role === Role.PARENT) router.replace('/parent');
     else router.replace('/dashboard');
   }, [user, isLoading, router]);
 
