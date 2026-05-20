@@ -66,12 +66,8 @@ export default function Navbar() {
       <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
         {/* Brand */}
         <div className="flex items-center gap-3 cursor-pointer" onClick={() => router.push('/dashboard')}>
-          {/* Lagos coat of arms placeholder (white circle with text) */}
-          <div
-            className="w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-            style={{ background: 'white', color: 'var(--lagos-blue)', lineHeight: '1' }}
-          >
-            <span style={{ fontSize: '0.55rem', textAlign: 'center', lineHeight: '1.1' }}>LAGOS<br/>STATE</span>
+          <div className="w-10 h-10 rounded-full overflow-hidden shrink-0" style={{ border: '2px solid var(--lagos-gold)' }}>
+            <Image src="/logo.png" alt="Lagos State Government" width={40} height={40} className="w-full h-full object-cover" priority />
           </div>
           <div>
             <div className="font-bold text-lg leading-none tracking-tight">Eko Excel</div>
