@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { Role } from '@/lib/types';
@@ -81,14 +82,10 @@ export default function LoginPage() {
         {/* Logo block */}
         <div className="text-center mb-8">
           <div
-            className="w-20 h-20 rounded-full mx-auto mb-4 flex items-center justify-center shadow-xl"
-            style={{ background: 'white', border: '4px solid var(--lagos-gold)' }}
+            className="w-20 h-20 rounded-full mx-auto mb-4 overflow-hidden shadow-xl"
+            style={{ border: '4px solid var(--lagos-gold)' }}
           >
-            <div style={{ color: 'var(--lagos-blue)', lineHeight: '1.2', textAlign: 'center' }}>
-              <div className="font-black text-xs">LAGOS</div>
-              <div className="font-black text-xs">STATE</div>
-              <div style={{ fontSize: '0.55rem', color: 'var(--lagos-green)' }}>GOV</div>
-            </div>
+            <Image src="/logo.png" alt="Lagos State Government" width={80} height={80} className="w-full h-full object-cover" priority />
           </div>
           <h1 className="text-3xl font-black text-white tracking-tight">Eko Excel</h1>
           <p style={{ color: '#A8C4F0' }} className="text-sm mt-1">
