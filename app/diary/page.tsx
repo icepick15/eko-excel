@@ -1,144 +1,217 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { Role, BehavioralTrait, BEHAVIORAL_TRAIT_LABELS } from '@/lib/types';
-import type { Student, TopicSegment, DiaryEntry } from '@/lib/types';
-import { studentStore, topicStore, diaryStore } from '@/lib/storage';
+import type { Student, TopicSegment, TeacherClassSubject, Class } from '@/lib/types';
+import { tcsStore, classStore, studentStore, topicStore, diaryStore, attendanceStore } from '@/lib/storage';
 import { recomputeStudent } from '@/lib/calculations';
 import Navbar from '@/components/Navbar';
-
-const TRAIT_OPTIONS: Array<'high' | 'medium' | 'low'> = ['high', 'medium', 'low'];
-const TRAIT_COLORS: Record<string, string> = {
-  high: 'var(--lagos-green)',
-  medium: 'var(--lagos-gold)',
-  low: 'var(--lagos-red)',
-};
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
+const STEPS = ['Class', 'Attendance', 'Topics', 'Score & Traits', 'Review'];
+
+const DEFAULT_TRAITS: Record<BehavioralTrait, number> = {
+  [BehavioralTrait.ENGAGEMENT]: 3,
+  [BehavioralTrait.PERSISTENCE]: 3,
+  [BehavioralTrait.FOCUS]: 3,
+  [BehavioralTrait.COLLABORATION]: 3,
+  [BehavioralTrait.RESILIENCE]: 3,
+};
+
+const TRAIT_COLORS: Record<number, string> = {
+  1: '#E30613',
+  2: '#F97316',
+  3: '#FFCC00',
+  4: '#22C55E',
+  5: '#008751',
+};
+
 export default function DiaryEntryPage() {
   const { user, isLoading } = useAuth();
   const router = useRouter();
 
+  // Step tracker
+  const [step, setStep] = useState(0);
+
+  // Step 0: class/subject selection
+  const [myTcs, setMyTcs] = useState<TeacherClassSubject[]>([]);
+  const [selectedTcsId, setSelectedTcsId] = useState('');
+
+  // Derived from selection
+  const [selectedClass, setSelectedClass] = useState<Class | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
   const [topics, setTopics] = useState<TopicSegment[]>([]);
-  const [subjects, setSubjects] = useState<string[]>([]);
 
-  // Form state
-  const [selectedSubject, setSelectedSubject] = useState('');
-  const [selectedTopicId, setSelectedTopicId] = useState('');
-  const [classScore, setClassScore] = useState('');
-  const [attendance, setAttendance] = useState<Set<string>>(new Set());
-  const [traits, setTraits] = useState<Record<BehavioralTrait, 'high' | 'medium' | 'low'>>({
-    [BehavioralTrait.ENGAGEMENT]: 'medium',
-    [BehavioralTrait.PERSISTENCE]: 'medium',
-    [BehavioralTrait.FOCUS]: 'medium',
-    [BehavioralTrait.COLLABORATION]: 'medium',
-    [BehavioralTrait.RESILIENCE]: 'medium',
-  });
+  // Step 1: attendance — set of PRESENT student IDs (default all present)
+  const [presentIds, setPresentIds] = useState<Set<string>>(new Set());
 
-  const [errors, setErrors] = useState<string[]>([]);
+  // Step 2: topics
+  const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>([]);
+  const [notes, setNotes] = useState('');
+
+  // Step 3: score and traits
+  const [classScore, setClassScore] = useState(60);
+  const [traits, setTraits] = useState<Record<BehavioralTrait, number>>({ ...DEFAULT_TRAITS });
+
+  const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (isLoading) return;
     if (!user) { router.replace('/login'); return; }
-    if (user.role !== Role.TEACHER) { router.replace('/dashboard'); return; }
-
-    const myStudents = studentStore.getBySchool(user.schoolId!);
-    setStudents(myStudents);
-    // Default: all present
-    setAttendance(new Set(myStudents.map((s) => s.id)));
-
-    const allTopics = topicStore.getAll();
-    setTopics(allTopics);
-    const uniqueSubjects = [...new Set(allTopics.map((t) => t.subject))].sort();
-    setSubjects(uniqueSubjects);
-    if (uniqueSubjects[0]) setSelectedSubject(uniqueSubjects[0]);
+    if (user.role !== Role.TEACHER && user.role !== Role.HEADTEACHER) {
+      router.replace('/dashboard');
+      return;
+    }
+    const tcs = tcsStore.getByTeacher(user.id);
+    setMyTcs(tcs);
+    if (tcs.length > 0) setSelectedTcsId(tcs[0].id);
   }, [user, isLoading, router]);
 
-  const filteredTopics = topics.filter((t) => t.subject === selectedSubject);
+  // When selectedTcsId changes, load class + students + topics
+  useEffect(() => {
+    if (!selectedTcsId) return;
+    const tcs = myTcs.find((t) => t.id === selectedTcsId);
+    if (!tcs) return;
 
-  function toggleAttendance(id: string) {
-    setAttendance((prev) => {
+    const cls = classStore.getById(tcs.classId);
+    setSelectedClass(cls ?? null);
+
+    const classStudents = studentStore.getByClass(tcs.classId);
+    setStudents(classStudents);
+    setPresentIds(new Set(classStudents.map((s) => s.id)));
+
+    const classTopics = topicStore.getBySubject(tcs.subject);
+    setTopics(classTopics);
+    setSelectedTopicIds([]);
+  }, [selectedTcsId, myTcs]);
+
+  const selectedTcs = myTcs.find((t) => t.id === selectedTcsId);
+
+  function togglePresent(id: string) {
+    setPresentIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
   }
 
-  function validate(): string[] {
-    const errs: string[] = [];
-    if (!selectedTopicId) errs.push('Select a topic');
-    const score = parseInt(classScore);
-    if (isNaN(score) || score < 0 || score > 100) errs.push('Class score must be 0–100');
-    if (attendance.size === 0) errs.push('At least one student must be marked present');
-    return errs;
+  function toggleTopic(id: string) {
+    setSelectedTopicIds((prev) =>
+      prev.includes(id)
+        ? prev.filter((x) => x !== id)
+        : prev.length < 3 ? [...prev, id] : prev
+    );
   }
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    const errs = validate();
-    setErrors(errs);
-    if (errs.length > 0) return;
+  function setTrait(trait: BehavioralTrait, val: number) {
+    setTraits((prev) => ({ ...prev, [trait]: val }));
+  }
 
-    setLoading(true);
-    const entry: DiaryEntry = {
+  function scoreColor(score: number): string {
+    if (score >= 75) return '#008751';
+    if (score >= 55) return '#FFCC00';
+    return '#E30613';
+  }
+
+  function scoreLabel(score: number): string {
+    if (score >= 75) return 'Good performance';
+    if (score >= 55) return 'Needs improvement';
+    return 'Below threshold';
+  }
+
+  const canProceed = useCallback((): boolean => {
+    if (step === 0) return !!selectedTcsId;
+    if (step === 1) return presentIds.size > 0;
+    if (step === 2) return selectedTopicIds.length > 0;
+    if (step === 3) return true;
+    return true;
+  }, [step, selectedTcsId, presentIds, selectedTopicIds]);
+
+  function handleSubmit() {
+    if (!selectedTcs || !selectedClass) return;
+    setSubmitting(true);
+
+    const now = new Date().toISOString();
+    const today = now.slice(0, 10);
+    const presentArr = Array.from(presentIds);
+    const absentArr = students.filter((s) => !presentIds.has(s.id)).map((s) => s.id);
+
+    const entry = {
       id: uid(),
-      idempotencyKey: `${user!.id}-${selectedTopicId}-${Date.now()}`,
-      studentId: students[0].id, // diary is per-class; we record class-level
       teacherId: user!.id,
-      topicId: selectedTopicId,
-      classScore: parseInt(classScore),
-      attendance: Array.from(attendance),
-      behavioralTraits: traits,
-      createdAt: new Date().toISOString(),
+      classId: selectedClass.id,
+      subject: selectedTcs.subject,
+      topicIds: selectedTopicIds,
+      classScore,
+      presentStudentIds: presentArr,
+      absentStudentIds: absentArr,
+      traits,
+      notes: notes.trim() || undefined,
+      submittedAt: now,
+      syncStatus: 'pending_sync' as const,
     };
+    diaryStore.save(entry);
 
-    // Save one entry per present student
-    const presentStudents = students.filter((s) => attendance.has(s.id));
-    presentStudents.forEach((student) => {
-      diaryStore.save({
-        ...entry,
-        id: uid(),
-        idempotencyKey: `${user!.id}-${student.id}-${selectedTopicId}-${Date.now()}`,
-        studentId: student.id,
-      });
-      recomputeStudent(student.id);
-    });
+    // Record per-student attendance
+    const attRecords = students.map((s) => ({
+      id: `att-${s.id}-${today}`,
+      studentId: s.id,
+      diaryId: entry.id,
+      date: today,
+      status: presentIds.has(s.id) ? 'present' as const : 'absent' as const,
+    }));
+    attendanceStore.saveMany(attRecords);
 
-    setLoading(false);
+    // Recompute metrics for present students
+    presentArr.forEach((sid) => recomputeStudent(sid));
+
+    setSubmitting(false);
     setSubmitted(true);
   }
 
+  // ── Success screen ───────────────────────────────────────────────────────
   if (submitted) {
     return (
       <div className="min-h-screen" style={{ background: 'var(--background)' }}>
         <Navbar />
-        <div className="max-w-md mx-auto px-4 py-16 text-center">
+        <div className="max-w-md mx-auto px-4 py-20 text-center">
           <div
-            className="w-20 h-20 rounded-full mx-auto flex items-center justify-center text-3xl mb-6 shadow-lg"
-            style={{ background: 'var(--lagos-green)', color: 'white' }}
+            className="w-24 h-24 rounded-full mx-auto flex items-center justify-center text-4xl mb-6 shadow-lg"
+            style={{ background: '#008751', color: 'white' }}
           >
             ✓
           </div>
-          <h2 className="text-2xl font-bold mb-2" style={{ color: 'var(--lagos-blue)' }}>Diary Submitted!</h2>
-          <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>
-            Student metrics have been updated. WAEC readiness recalculated.
+          <h2 className="text-2xl font-bold mb-2" style={{ color: '#0033A0' }}>Diary Submitted!</h2>
+          <p className="text-sm mb-2" style={{ color: 'var(--text-muted)' }}>
+            {selectedTcs?.subject} · {selectedClass?.level}{selectedClass?.section}
+          </p>
+          <p className="text-sm mb-8" style={{ color: 'var(--text-muted)' }}>
+            {presentIds.size} students present · WAEC readiness updated
           </p>
           <div className="flex flex-col gap-3">
-            <button className="btn-primary w-full" onClick={() => setSubmitted(false)}>
-              + Another Entry
+            <button
+              className="w-full py-3 rounded-xl font-bold text-white text-sm"
+              style={{ background: '#0033A0' }}
+              onClick={() => {
+                setStep(0);
+                setSubmitted(false);
+                setSelectedTopicIds([]);
+                setNotes('');
+                setClassScore(60);
+                setTraits({ ...DEFAULT_TRAITS });
+              }}
+            >
+              + Log Another Entry
             </button>
             <button
               className="w-full py-3 rounded-xl font-semibold text-sm"
-              style={{ background: 'var(--lagos-blue-light)', color: 'var(--lagos-blue)' }}
+              style={{ background: '#E8F0FE', color: '#0033A0' }}
               onClick={() => router.push('/dashboard')}
             >
               Back to Dashboard
@@ -149,195 +222,431 @@ export default function DiaryEntryPage() {
     );
   }
 
+  const progressPct = Math.round(((step + 1) / STEPS.length) * 100);
+
   return (
     <div className="min-h-screen" style={{ background: 'var(--background)' }}>
       <Navbar />
 
-      <main className="max-w-2xl mx-auto px-4 py-8">
-        {/* Header */}
-        <div className="mb-6">
-          <div className="flex items-center gap-2 mb-1">
+      {/* Progress header */}
+      <div style={{ background: '#0033A0', color: 'white' }} className="px-4 pt-4 pb-3">
+        <div className="max-w-2xl mx-auto">
+          <div className="flex items-center justify-between mb-2">
             <button
-              onClick={() => router.back()}
-              className="text-xs font-medium"
-              style={{ color: 'var(--text-muted)' }}
+              onClick={() => step > 0 ? setStep(step - 1) : router.back()}
+              className="text-sm font-medium opacity-80 hover:opacity-100"
             >
-              ← Back
+              ← {step === 0 ? 'Back' : STEPS[step - 1]}
             </button>
+            <span className="text-xs font-bold opacity-70">
+              Step {step + 1} of {STEPS.length} — {STEPS[step]}
+            </span>
           </div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--lagos-blue)' }}>New Diary Entry</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-            Should take less than 2 minutes &nbsp;·&nbsp;{' '}
-            {new Date().toLocaleDateString('en-NG', { weekday: 'long', month: 'long', day: 'numeric' })}
-          </p>
+          <div className="h-1.5 rounded-full" style={{ background: 'rgba(255,255,255,0.2)' }}>
+            <div
+              className="h-1.5 rounded-full transition-all duration-300"
+              style={{ width: `${progressPct}%`, background: '#FFCC00' }}
+            />
+          </div>
         </div>
+      </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-          {/* 1. Subject + Topic */}
-          <div className="card">
-            <h3 className="font-bold text-sm mb-3" style={{ color: 'var(--lagos-blue)' }}>1. Lesson Topic</h3>
-            <div className="flex flex-col gap-3">
-              <div>
-                <label className="text-xs font-semibold block mb-1.5" style={{ color: 'var(--text-muted)' }}>Subject</label>
-                <select
-                  className="input"
-                  value={selectedSubject}
-                  onChange={(e) => { setSelectedSubject(e.target.value); setSelectedTopicId(''); }}
-                >
-                  {subjects.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
+      <main className="max-w-2xl mx-auto px-4 py-6 pb-28">
+
+        {/* ── Step 0: Class + Subject ───────────────────────────────────── */}
+        {step === 0 && (
+          <div>
+            <h1 className="text-xl font-bold mb-1" style={{ color: '#0033A0' }}>
+              Which lesson are you logging?
+            </h1>
+            <p className="text-sm mb-5" style={{ color: 'var(--text-muted)' }}>
+              {new Date().toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long' })}
+            </p>
+
+            {myTcs.length === 0 ? (
+              <div className="card text-center py-10">
+                <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                  No class assignments found. Contact your school admin.
+                </p>
               </div>
-              <div>
-                <label className="text-xs font-semibold block mb-1.5" style={{ color: 'var(--text-muted)' }}>Topic Covered</label>
-                <select
-                  className="input"
-                  value={selectedTopicId}
-                  onChange={(e) => setSelectedTopicId(e.target.value)}
-                >
-                  <option value="">Select topic...</option>
-                  {filteredTopics.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.topic} (WAEC weight: {(t.waecFrequency * 100).toFixed(0)}%)
-                    </option>
-                  ))}
-                </select>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {myTcs.map((tcs) => {
+                  const cls = classStore.getById(tcs.classId);
+                  const isSelected = tcs.id === selectedTcsId;
+                  return (
+                    <button
+                      key={tcs.id}
+                      onClick={() => setSelectedTcsId(tcs.id)}
+                      className="w-full text-left p-4 rounded-2xl transition-all"
+                      style={{
+                        background: isSelected ? '#E8F0FE' : 'var(--card-bg)',
+                        border: `2px solid ${isSelected ? '#0033A0' : 'var(--border)'}`,
+                      }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="font-bold text-base" style={{ color: '#0033A0' }}>
+                            {tcs.subject}
+                          </div>
+                          <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                            {cls ? `${cls.level}${cls.section} · ${cls.academicYear}` : tcs.classId}
+                          </div>
+                        </div>
+                        <div
+                          className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold"
+                          style={{
+                            background: isSelected ? '#0033A0' : 'var(--border)',
+                            color: 'white',
+                          }}
+                        >
+                          {isSelected ? '✓' : ''}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
-            </div>
+            )}
           </div>
+        )}
 
-          {/* 2. Class Score */}
-          <div className="card">
-            <h3 className="font-bold text-sm mb-3" style={{ color: 'var(--lagos-blue)' }}>2. Class Performance Score</h3>
-            <div>
-              <label className="text-xs font-semibold block mb-1.5" style={{ color: 'var(--text-muted)' }}>
-                Class Average Score (0 – 100)
-              </label>
-              <input
-                className="input text-2xl font-bold text-center"
-                type="number"
-                min="0"
-                max="100"
-                placeholder="e.g. 72"
-                value={classScore}
-                onChange={(e) => setClassScore(e.target.value)}
-              />
-              {classScore && (
-                <div
-                  className="mt-2 text-center text-sm font-semibold"
-                  style={{
-                    color: parseInt(classScore) >= 75 ? 'var(--lagos-green)'
-                      : parseInt(classScore) >= 55 ? 'var(--lagos-gold)'
-                      : 'var(--lagos-red)',
-                  }}
-                >
-                  {parseInt(classScore) >= 75 ? '✓ Good performance' : parseInt(classScore) >= 55 ? '⚠ Needs improvement' : '✗ Below threshold'}
-                </div>
-              )}
+        {/* ── Step 1: Attendance ───────────────────────────────────────── */}
+        {step === 1 && (
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <h1 className="text-xl font-bold" style={{ color: '#0033A0' }}>Mark Attendance</h1>
+              <span className="text-sm font-bold" style={{ color: '#008751' }}>
+                {presentIds.size}/{students.length} present
+              </span>
             </div>
-          </div>
+            <p className="text-sm mb-4" style={{ color: 'var(--text-muted)' }}>
+              Tap a circle to mark absent. Default is all present.
+            </p>
 
-          {/* 3. Attendance */}
-          <div className="card">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-bold text-sm" style={{ color: 'var(--lagos-blue)' }}>
-                3. Attendance ({attendance.size}/{students.length})
-              </h3>
-              <div className="flex gap-2">
-                <button type="button" className="text-xs font-medium px-2 py-1 rounded"
-                  style={{ background: 'var(--lagos-green-light)', color: 'var(--lagos-green)' }}
-                  onClick={() => setAttendance(new Set(students.map((s) => s.id)))}>
-                  All Present
-                </button>
-                <button type="button" className="text-xs font-medium px-2 py-1 rounded"
-                  style={{ background: '#FEE2E2', color: 'var(--lagos-red)' }}
-                  onClick={() => setAttendance(new Set())}>
-                  All Absent
-                </button>
-              </div>
+            <div className="flex gap-2 mb-4">
+              <button
+                onClick={() => setPresentIds(new Set(students.map((s) => s.id)))}
+                className="flex-1 py-2 rounded-xl text-xs font-bold"
+                style={{ background: '#DCFCE7', color: '#008751', border: '1.5px solid #008751' }}
+              >
+                All Present
+              </button>
+              <button
+                onClick={() => setPresentIds(new Set())}
+                className="flex-1 py-2 rounded-xl text-xs font-bold"
+                style={{ background: '#FEE2E2', color: '#E30613', border: '1.5px solid #E30613' }}
+              >
+                All Absent
+              </button>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              {students.map((student) => {
-                const isPresent = attendance.has(student.id);
+
+            {/* 5-per-row circles */}
+            <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
+              {students.map((s) => {
+                const isPresent = presentIds.has(s.id);
+                const initials = s.name.split(' ').slice(0, 2).map((n) => n[0]).join('');
                 return (
                   <button
-                    key={student.id}
-                    type="button"
-                    onClick={() => toggleAttendance(student.id)}
-                    className="flex items-center gap-2 p-2.5 rounded-xl text-left transition-all"
-                    style={{
-                      background: isPresent ? 'var(--lagos-green-light)' : 'var(--background)',
-                      border: `1.5px solid ${isPresent ? 'var(--lagos-green)' : 'var(--border)'}`,
-                    }}
+                    key={s.id}
+                    onClick={() => togglePresent(s.id)}
+                    className="flex flex-col items-center gap-1"
+                    title={s.name}
                   >
                     <div
-                      className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-                      style={{ background: isPresent ? 'var(--lagos-green)' : 'var(--border)', color: 'white' }}
+                      className="w-12 h-12 rounded-full flex items-center justify-center text-sm font-bold transition-all"
+                      style={{
+                        background: isPresent ? '#008751' : '#E30613',
+                        color: 'white',
+                        boxShadow: isPresent ? '0 0 0 2px #DCFCE7' : '0 0 0 2px #FEE2E2',
+                      }}
                     >
-                      {isPresent ? '✓' : ''}
+                      {initials}
                     </div>
-                    <span className="text-xs font-medium truncate">{student.name.split(' ')[0]}</span>
+                    <span
+                      className="text-xs text-center leading-tight"
+                      style={{ color: 'var(--text-muted)', maxWidth: 48, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    >
+                      {s.name.split(' ')[0]}
+                    </span>
                   </button>
                 );
               })}
             </div>
-          </div>
 
-          {/* 4. Behavioral Traits */}
-          <div className="card">
-            <h3 className="font-bold text-sm mb-3" style={{ color: 'var(--lagos-blue)' }}>4. Behavioral Traits (All Mandatory)</h3>
-            <div className="flex flex-col gap-4">
-              {Object.values(BehavioralTrait).map((trait) => (
-                <div key={trait}>
-                  <label className="text-xs font-semibold block mb-2" style={{ color: 'var(--foreground)' }}>
-                    {BEHAVIORAL_TRAIT_LABELS[trait]}
-                  </label>
-                  <div className="flex gap-2">
-                    {TRAIT_OPTIONS.map((option) => {
-                      const isSelected = traits[trait] === option;
-                      return (
-                        <button
-                          key={option}
-                          type="button"
-                          onClick={() => setTraits((prev) => ({ ...prev, [trait]: option }))}
-                          className="flex-1 py-2 rounded-lg text-xs font-bold capitalize transition-all"
-                          style={{
-                            background: isSelected ? TRAIT_COLORS[option] : 'var(--background)',
-                            color: isSelected ? 'white' : 'var(--text-muted)',
-                            border: `1.5px solid ${isSelected ? TRAIT_COLORS[option] : 'var(--border)'}`,
-                          }}
-                        >
-                          {option}
-                        </button>
-                      );
-                    })}
+            {presentIds.size === 0 && (
+              <p className="text-xs mt-4 text-center" style={{ color: '#E30613' }}>
+                At least one student must be present
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* ── Step 2: Topics ───────────────────────────────────────────── */}
+        {step === 2 && (
+          <div>
+            <h1 className="text-xl font-bold mb-1" style={{ color: '#0033A0' }}>Topics Covered</h1>
+            <p className="text-sm mb-4" style={{ color: 'var(--text-muted)' }}>
+              Select up to 3 topics. ⚡ = high WAEC weight.
+            </p>
+
+            <div className="flex flex-wrap gap-2 mb-5">
+              {topics.map((t) => {
+                const isSelected = selectedTopicIds.includes(t.id);
+                const isWaec = t.waecWeight >= 7;
+                const canSelect = isSelected || selectedTopicIds.length < 3;
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => canSelect && toggleTopic(t.id)}
+                    className="px-3 py-2 rounded-full text-xs font-semibold transition-all flex items-center gap-1"
+                    style={{
+                      background: isSelected ? '#0033A0' : 'var(--card-bg)',
+                      color: isSelected ? 'white' : 'var(--foreground)',
+                      border: `1.5px solid ${isSelected ? '#0033A0' : isWaec ? '#FFCC00' : 'var(--border)'}`,
+                      opacity: !canSelect && !isSelected ? 0.4 : 1,
+                    }}
+                  >
+                    {isWaec && <span>⚡</span>}
+                    {t.topic}
+                    {t.subTopic && <span style={{ opacity: 0.7 }}> · {t.subTopic}</span>}
+                  </button>
+                );
+              })}
+              {topics.length === 0 && (
+                <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                  No topics found for {selectedTcs?.subject}
+                </p>
+              )}
+            </div>
+
+            {selectedTopicIds.length > 0 && (
+              <div className="mb-4 p-3 rounded-xl" style={{ background: '#E8F0FE' }}>
+                <p className="text-xs font-semibold mb-1" style={{ color: '#0033A0' }}>Selected ({selectedTopicIds.length}/3):</p>
+                {selectedTopicIds.map((tid) => {
+                  const t = topics.find((x) => x.id === tid);
+                  return t ? (
+                    <div key={tid} className="text-xs" style={{ color: '#0033A0' }}>
+                      • {t.topic} {t.waecWeight >= 7 && '⚡'}
+                    </div>
+                  ) : null;
+                })}
+              </div>
+            )}
+
+            <div>
+              <label className="text-xs font-semibold block mb-1" style={{ color: 'var(--text-muted)' }}>
+                Notes (optional · {notes.length}/200)
+              </label>
+              <textarea
+                className="w-full rounded-xl p-3 text-sm resize-none"
+                style={{ border: '1.5px solid var(--border)', background: 'var(--card-bg)', minHeight: 80 }}
+                maxLength={200}
+                placeholder="Any observations about today's lesson..."
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 3: Score + Traits ───────────────────────────────────── */}
+        {step === 3 && (
+          <div>
+            <h1 className="text-xl font-bold mb-4" style={{ color: '#0033A0' }}>Class Performance</h1>
+
+            {/* Score slider */}
+            <div className="card mb-4">
+              <div className="flex items-end justify-between mb-2">
+                <span className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>Class Average Score</span>
+                <span className="text-3xl font-black" style={{ color: scoreColor(classScore) }}>
+                  {classScore}%
+                </span>
+              </div>
+
+              {/* Colour-zone background bar */}
+              <div className="relative h-3 rounded-full mb-3 overflow-hidden" style={{ background: 'var(--border)' }}>
+                <div className="absolute inset-0 flex">
+                  <div style={{ width: '55%', background: '#FEE2E2' }} />
+                  <div style={{ width: '20%', background: '#FEF9C3' }} />
+                  <div style={{ flex: 1,        background: '#DCFCE7' }} />
+                </div>
+                <div
+                  className="absolute top-0 bottom-0 w-4 h-4 rounded-full border-2 border-white shadow"
+                  style={{
+                    left: `calc(${classScore}% - 8px)`,
+                    background: scoreColor(classScore),
+                    top: '-2px',
+                  }}
+                />
+              </div>
+
+              <input
+                type="range"
+                min={0} max={100}
+                value={classScore}
+                onChange={(e) => setClassScore(Number(e.target.value))}
+                className="w-full mb-2"
+                style={{ accentColor: scoreColor(classScore) }}
+              />
+
+              <div className="flex justify-between text-xs" style={{ color: 'var(--text-muted)' }}>
+                <span>0 — Poor</span>
+                <span style={{ color: scoreColor(classScore), fontWeight: 700 }}>
+                  {scoreLabel(classScore)}
+                </span>
+                <span>100 — Excellent</span>
+              </div>
+            </div>
+
+            {/* Behavioural traits */}
+            <div className="card">
+              <h3 className="text-sm font-bold mb-4" style={{ color: '#0033A0' }}>Behavioural Traits</h3>
+              <div className="flex flex-col gap-5">
+                {Object.values(BehavioralTrait).map((trait) => (
+                  <div key={trait}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-semibold" style={{ color: 'var(--foreground)' }}>
+                        {BEHAVIORAL_TRAIT_LABELS[trait]}
+                      </span>
+                      <span className="text-xs font-bold" style={{ color: TRAIT_COLORS[traits[trait]] }}>
+                        {traits[trait]}/5
+                      </span>
+                    </div>
+                    <div className="flex gap-2">
+                      {[1, 2, 3, 4, 5].map((val) => {
+                        const isActive = traits[trait] >= val;
+                        return (
+                          <button
+                            key={val}
+                            onClick={() => setTrait(trait, val)}
+                            className="flex-1 h-9 rounded-lg text-xs font-bold transition-all"
+                            style={{
+                              background: isActive ? TRAIT_COLORS[traits[trait]] : 'var(--background)',
+                              color: isActive ? 'white' : 'var(--text-muted)',
+                              border: `1.5px solid ${isActive ? TRAIT_COLORS[traits[trait]] : 'var(--border)'}`,
+                            }}
+                          >
+                            {val}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
+        )}
 
-          {/* Errors */}
-          {errors.length > 0 && (
-            <div className="rounded-xl p-4" style={{ background: '#FEE2E2', border: '1px solid #FCA5A5' }}>
-              {errors.map((e, i) => (
-                <div key={i} className="text-sm text-red-700 flex items-center gap-2">
-                  <span>✗</span> {e}
-                </div>
-              ))}
+        {/* ── Step 4: Review & Submit ──────────────────────────────────── */}
+        {step === 4 && (
+          <div>
+            <h1 className="text-xl font-bold mb-1" style={{ color: '#0033A0' }}>Review & Submit</h1>
+            <p className="text-sm mb-5" style={{ color: 'var(--text-muted)' }}>
+              Confirm the details below before submitting.
+            </p>
+
+            <div className="card mb-4">
+              <table className="w-full text-sm">
+                <tbody>
+                  <tr className="border-b" style={{ borderColor: 'var(--border)' }}>
+                    <td className="py-2 pr-4 font-semibold" style={{ color: 'var(--text-muted)', width: '40%' }}>Class</td>
+                    <td className="py-2 font-bold" style={{ color: '#0033A0' }}>
+                      {selectedClass?.level}{selectedClass?.section} — {selectedTcs?.subject}
+                    </td>
+                  </tr>
+                  <tr className="border-b" style={{ borderColor: 'var(--border)' }}>
+                    <td className="py-2 pr-4 font-semibold" style={{ color: 'var(--text-muted)' }}>Attendance</td>
+                    <td className="py-2">
+                      <span style={{ color: '#008751', fontWeight: 700 }}>{presentIds.size} present</span>
+                      {' '}
+                      <span style={{ color: 'var(--text-muted)' }}>/ {students.length} total</span>
+                    </td>
+                  </tr>
+                  <tr className="border-b" style={{ borderColor: 'var(--border)' }}>
+                    <td className="py-2 pr-4 font-semibold" style={{ color: 'var(--text-muted)' }}>Topics</td>
+                    <td className="py-2 text-xs" style={{ color: 'var(--foreground)' }}>
+                      {selectedTopicIds.map((tid) => {
+                        const t = topics.find((x) => x.id === tid);
+                        return t ? <div key={tid}>• {t.topic} {t.waecWeight >= 7 && '⚡'}</div> : null;
+                      })}
+                    </td>
+                  </tr>
+                  <tr className="border-b" style={{ borderColor: 'var(--border)' }}>
+                    <td className="py-2 pr-4 font-semibold" style={{ color: 'var(--text-muted)' }}>Class Score</td>
+                    <td className="py-2 font-black text-lg" style={{ color: scoreColor(classScore) }}>
+                      {classScore}%
+                    </td>
+                  </tr>
+                  {Object.values(BehavioralTrait).map((trait) => (
+                    <tr key={trait} className="border-b last:border-0" style={{ borderColor: 'var(--border)' }}>
+                      <td className="py-1.5 pr-4 text-xs" style={{ color: 'var(--text-muted)' }}>
+                        {BEHAVIORAL_TRAIT_LABELS[trait].split(' ')[0]}
+                      </td>
+                      <td className="py-1.5">
+                        <div className="flex gap-1">
+                          {[1, 2, 3, 4, 5].map((v) => (
+                            <div
+                              key={v}
+                              className="w-4 h-4 rounded-sm"
+                              style={{
+                                background: traits[trait] >= v ? TRAIT_COLORS[traits[trait]] : 'var(--border)',
+                              }}
+                            />
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {notes && (
+                    <tr>
+                      <td className="pt-2 pr-4 text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>Notes</td>
+                      <td className="pt-2 text-xs" style={{ color: 'var(--foreground)' }}>{notes}</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
-          )}
 
-          {/* Submit */}
-          <button
-            type="submit"
-            disabled={loading}
-            className="btn-success w-full py-4 text-base"
-            style={{ borderRadius: '12px' }}
-          >
-            {loading ? 'Saving...' : '✓ Submit Diary Entry'}
-          </button>
-        </form>
+            <button
+              onClick={handleSubmit}
+              disabled={submitting}
+              className="w-full py-4 rounded-2xl font-black text-base text-white transition-all"
+              style={{
+                background: submitting ? '#6B7280' : '#008751',
+                boxShadow: submitting ? 'none' : '0 4px 14px rgba(0,135,81,0.4)',
+              }}
+            >
+              {submitting ? 'Saving...' : '✓ Submit Diary Entry'}
+            </button>
+          </div>
+        )}
       </main>
+
+      {/* Fixed bottom nav */}
+      {step < 4 && (
+        <div
+          className="fixed bottom-0 left-0 right-0 px-4 py-4"
+          style={{ background: 'var(--background)', borderTop: '1px solid var(--border)' }}
+        >
+          <div className="max-w-2xl mx-auto">
+            <button
+              onClick={() => {
+                if (step === 3 || canProceed()) setStep(step + 1);
+              }}
+              disabled={!canProceed()}
+              className="w-full py-4 rounded-2xl font-bold text-white text-base transition-all"
+              style={{
+                background: canProceed() ? '#0033A0' : '#9CA3AF',
+                boxShadow: canProceed() ? '0 4px 14px rgba(0,51,160,0.3)' : 'none',
+              }}
+            >
+              {step === 3 ? 'Review →' : 'Continue →'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

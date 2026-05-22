@@ -13,7 +13,7 @@ const DEMO_ACCOUNTS = [
   { phone: '08045678901', name: 'Dr. Fatima Sule', role: 'District Officer' },
   { phone: '08056789012', name: 'Hon. Gbenga Adewale', role: 'Ministry Official' },
   { phone: '08067890123', name: 'Abiodun Fashola', role: 'Student (SS1)' },
-  { phone: '08089012345', name: 'Mr. Emeka Fashola', role: 'Parent' },
+  { phone: '08089012345', name: 'Mr. Taiwo Fashola', role: 'Parent' },
 ];
 
 export default function LoginPage() {
@@ -28,7 +28,7 @@ export default function LoginPage() {
   useEffect(() => {
     if (!isLoading && user) {
       if (user.role === Role.TEACHER) router.replace('/dashboard');
-      else if (user.role === Role.HEADTEACHER) router.replace('/school');
+      else if (user.role === Role.HEADTEACHER || user.role === Role.SCHOOLADMIN) router.replace('/school');
       else if (user.role === Role.DISTRICT) router.replace('/district');
       else if (user.role === Role.MINISTRY) router.replace('/ministry');
       else if (user.role === Role.STUDENT) router.replace('/student');

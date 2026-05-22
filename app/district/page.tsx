@@ -3,23 +3,27 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
-import { Role, ColorStatus, WAEC_SUBJECTS } from '@/lib/types';
-import type { School, Student } from '@/lib/types';
-import { schoolStore, studentStore, metricsStore, hotspotStore, districtStore } from '@/lib/storage';
-import { recomputeStudent } from '@/lib/calculations';
+import { Role, ColorStatus, CORE_SUBJECTS } from '@/lib/types';
+import type { School, Student, Class } from '@/lib/types';
+import {
+  schoolStore, studentStore, metricsStore, hotspotStore,
+  districtStore, classStore, userStore,
+} from '@/lib/storage';
+import { getSchoolReadinessAvg, getTeacherComplianceThisWeek } from '@/lib/calculations';
 import Navbar from '@/components/Navbar';
+
+type SortKey = 'readiness' | 'name' | 'hotspots';
 
 export default function DistrictDashboard() {
   const { user, isLoading } = useAuth();
   const router = useRouter();
 
-  const [schools, setSchools] = useState<School[]>([]);
-  const [allStudents, setAllStudents] = useState<Student[]>([]);
+  const [schools,      setSchools]      = useState<School[]>([]);
+  const [allStudents,  setAllStudents]  = useState<Student[]>([]);
   const [districtName, setDistrictName] = useState('');
-  const [computed, setComputed] = useState(false);
-  const [search, setSearch] = useState('');
-  const [filterSubject, setFilterSubject] = useState('');
+  const [search,       setSearch]       = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'green' | 'yellow' | 'red'>('all');
+  const [sortSchool,   setSortSchool]   = useState<SortKey>('readiness');
   const [selectedSchool, setSelectedSchool] = useState('');
 
   useEffect(() => {
@@ -32,225 +36,259 @@ export default function DistrictDashboard() {
 
     const mySchools = schoolStore.getByDistrict(user.districtId!);
     setSchools(mySchools);
+    setAllStudents(studentStore.getByDistrict(user.districtId!));
+  }, [user, isLoading, router]);
 
-    const students = studentStore.getByDistrict(user.districtId!);
-    setAllStudents(students);
-
-    if (!computed) {
-      students.forEach((s) => recomputeStudent(s.id));
-      setComputed(true);
-    }
-  }, [user, isLoading, computed, router]);
-
-  function getAvg(studentId: string, subject?: string): number {
-    const metrics = metricsStore.getByStudent(studentId);
-    const filtered = subject ? metrics.filter((m) => m.subject === subject) : metrics;
+  function getStudentAvg(studentId: string, subject?: string): number {
+    const ms = metricsStore.getByStudent(studentId);
+    const filtered = subject ? ms.filter((m) => m.subject === subject) : ms;
     if (filtered.length === 0) return 0;
-    return filtered.reduce((a, m) => a + m.readinessScore, 0) / filtered.length;
+    return Math.round(filtered.reduce((a, m) => a + m.readinessScore, 0) / filtered.length);
   }
 
-  function getStatus(studentId: string): ColorStatus {
-    const avg = getAvg(studentId);
+  function getStatus(avg: number): ColorStatus {
     return avg >= 75 ? ColorStatus.GREEN : avg >= 55 ? ColorStatus.YELLOW : ColorStatus.RED;
   }
 
-  function schoolAvg(schoolId: string): number {
-    const students = studentStore.getBySchool(schoolId);
-    if (students.length === 0) return 0;
-    return students.reduce((a, s) => a + getAvg(s.id), 0) / students.length;
-  }
+  // School-level stats
+  const schoolStats = schools.map((school) => {
+    const studs = studentStore.getBySchool(school.id);
+    const avg = getSchoolReadinessAvg(school.id);
+    const hs  = hotspotStore.getBySchool(school.id).length;
+    const teachers = userStore.getTeachers(school.id);
+    const compliance = teachers.length > 0
+      ? Math.round(teachers.reduce((a, t) => a + getTeacherComplianceThisWeek(t.id).rate, 0) / teachers.length)
+      : 0;
+    return { school, studs, avg, hs, compliance };
+  }).sort((a, b) => {
+    if (sortSchool === 'name')      return a.school.name.localeCompare(b.school.name);
+    if (sortSchool === 'hotspots')  return b.hs - a.hs;
+    return a.avg - b.avg; // lowest readiness first by default
+  });
 
+  // District totals
+  const districtAvg = allStudents.length > 0
+    ? Math.round(allStudents.reduce((a, s) => a + getStudentAvg(s.id), 0) / allStudents.length)
+    : 0;
+  const totalHs  = allStudents.reduce((a, s) => a + hotspotStore.getByStudent(s.id).length, 0);
+  const greenCnt = allStudents.filter((s) => getStatus(getStudentAvg(s.id)) === ColorStatus.GREEN).length;
+  const redCnt   = allStudents.filter((s) => getStatus(getStudentAvg(s.id)) === ColorStatus.RED).length;
+
+  // Subject heatmap by school
+  const heatmap = CORE_SUBJECTS.map((subject) => ({
+    subject,
+    schools: schools.map((sc) => {
+      const studs = studentStore.getBySchool(sc.id);
+      const avg = studs.length > 0
+        ? Math.round(studs.reduce((a, s) => a + getStudentAvg(s.id, subject), 0) / studs.length)
+        : 0;
+      return { school: sc, avg };
+    }),
+  }));
+
+  // Filtered student list
   const filteredStudents = allStudents
     .filter((s) => !selectedSchool || s.schoolId === selectedSchool)
     .filter((s) => !search || s.name.toLowerCase().includes(search.toLowerCase()))
-    .filter((s) => filterStatus === 'all' || getStatus(s.id) === filterStatus)
-    .sort((a, b) => {
-      const aScore = filterSubject ? getAvg(a.id, filterSubject) : getAvg(a.id);
-      const bScore = filterSubject ? getAvg(b.id, filterSubject) : getAvg(b.id);
-      return aScore - bScore; // ascending: worst first
-    });
+    .filter((s) => {
+      if (filterStatus === 'all') return true;
+      const st = getStatus(getStudentAvg(s.id));
+      return st === filterStatus;
+    })
+    .sort((a, b) => getStudentAvg(a.id) - getStudentAvg(b.id))
+    .slice(0, 40);
 
-  const totalHotspots = allStudents.reduce((acc, s) => acc + hotspotStore.getByStudent(s.id).length, 0);
-  const greenCount = allStudents.filter((s) => getStatus(s.id) === ColorStatus.GREEN).length;
-  const redCount = allStudents.filter((s) => getStatus(s.id) === ColorStatus.RED).length;
+  if (isLoading) return null;
 
   return (
-    <div className="min-h-screen" style={{ background: 'var(--background)' }}>
+    <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
       <Navbar />
 
-      <main className="max-w-7xl mx-auto px-4 py-8">
+      <main className="max-w-4xl mx-auto px-4 py-5 pb-10">
         {/* Header */}
-        <div className="mb-6">
-          <div className="flex items-center gap-2 mb-1">
-            <div className="text-xs px-2 py-1 rounded font-medium" style={{ background: 'var(--lagos-blue-light)', color: 'var(--lagos-blue)' }}>
-              District View
-            </div>
-          </div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--lagos-blue)' }}>{districtName}</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-            {schools.length} Schools &nbsp;·&nbsp; {allStudents.length} Students
+        <div className="mb-5">
+          <span className="text-xs font-bold px-2 py-0.5 rounded-full mb-1 inline-block" style={{ background: '#EFF6FF', color: '#0033A0' }}>
+            District View
+          </span>
+          <h1 className="text-xl font-black" style={{ color: '#0033A0' }}>{districtName}</h1>
+          <p className="text-sm" style={{ color: '#6B7280' }}>
+            {schools.length} schools · {allStudents.length} students
           </p>
         </div>
 
-        {/* District-wide summary */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <div className="card text-center">
-            <div className="text-2xl font-black mb-1" style={{ color: 'var(--lagos-blue)' }}>{allStudents.length}</div>
-            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Total Students</div>
-          </div>
-          <div className="card text-center">
-            <div className="text-2xl font-black mb-1" style={{ color: 'var(--lagos-green)' }}>{greenCount}</div>
-            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>On Track (≥75%)</div>
-          </div>
-          <div className="card text-center">
-            <div className="text-2xl font-black mb-1" style={{ color: 'var(--lagos-red)' }}>{redCount}</div>
-            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>At Risk (&lt;55%)</div>
-          </div>
-          <div className="card text-center">
-            <div className="text-2xl font-black mb-1" style={{ color: 'var(--lagos-gold)' }}>{totalHotspots}</div>
-            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Active Alerts</div>
-          </div>
+        {/* KPI row */}
+        <div className="grid grid-cols-4 gap-3 mb-5">
+          <KPICard value={`${districtAvg}%`}  label="District Avg" color={districtAvg >= 75 ? '#008751' : districtAvg >= 55 ? '#FFCC00' : '#E30613'} />
+          <KPICard value={String(greenCnt)}    label="On Track"     color="#008751" />
+          <KPICard value={String(redCnt)}      label="At Risk"      color={redCnt > 0 ? '#E30613' : '#008751'} />
+          <KPICard value={String(totalHs)}     label="Hotspots"     color={totalHs > 0 ? '#E30613' : '#008751'} />
         </div>
 
-        {/* School performance summary */}
-        <div className="card mb-6">
-          <h2 className="font-bold text-sm mb-4" style={{ color: 'var(--lagos-blue)' }}>School Performance</h2>
+        {/* School leaderboard */}
+        <div className="rounded-2xl p-4 mb-5" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-bold text-sm" style={{ color: '#0033A0' }}>School Performance</h2>
+            <select
+              className="text-xs rounded-lg px-2 py-1"
+              style={{ border: '1.5px solid #E5E7EB', color: '#374151' }}
+              value={sortSchool}
+              onChange={(e) => setSortSchool(e.target.value as SortKey)}
+            >
+              <option value="readiness">Sort: Lowest First</option>
+              <option value="hotspots">Sort: Most Hotspots</option>
+              <option value="name">Sort: Name</option>
+            </select>
+          </div>
           <div className="flex flex-col gap-3">
-            {schools.map((school) => {
-              const avg = schoolAvg(school.id);
-              const schoolStudents = studentStore.getBySchool(school.id);
-              const schoolHotspots = hotspotStore.getBySchool(school.id);
-              const status = avg >= 75 ? ColorStatus.GREEN : avg >= 55 ? ColorStatus.YELLOW : ColorStatus.RED;
-              const barColor = status === ColorStatus.GREEN ? 'var(--lagos-green)' : status === ColorStatus.YELLOW ? 'var(--lagos-gold)' : 'var(--lagos-red)';
+            {schoolStats.map(({ school, studs, avg, hs, compliance }, rank) => {
+              const color = avg >= 75 ? '#008751' : avg >= 55 ? '#FFCC00' : '#E30613';
               return (
-                <div key={school.id} className="flex items-center gap-4 p-3 rounded-xl cursor-pointer hover:opacity-80"
-                  style={{ background: 'var(--background)' }}
-                  onClick={() => setSelectedSchool(selectedSchool === school.id ? '' : school.id)}>
+                <button
+                  key={school.id}
+                  onClick={() => setSelectedSchool(selectedSchool === school.id ? '' : school.id)}
+                  className="flex items-center gap-3 w-full text-left"
+                >
                   <div
-                    className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm shrink-0"
-                    style={{ background: 'var(--lagos-blue-light)', color: 'var(--lagos-blue)' }}
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-black shrink-0"
+                    style={{ background: rank === 0 ? '#FEE2E2' : rank === 1 ? '#FEF9C3' : '#F3F4F6', color: rank === 0 ? '#E30613' : rank === 1 ? '#854D0E' : '#6B7280' }}
                   >
-                    {school.name.charAt(0)}
+                    #{rank + 1}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-sm">{school.name}</div>
+                    <p className="font-semibold text-sm truncate" style={{ color: '#111827' }}>{school.name.split(',')[0]}</p>
                     <div className="flex items-center gap-3 mt-1">
-                      <div className="progress-bar flex-1" style={{ height: '6px' }}>
-                        <div className="progress-bar-fill" style={{ width: `${avg}%`, background: barColor, height: '6px' }} />
+                      <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: '#F3F4F6' }}>
+                        <div className="h-2 rounded-full" style={{ width: `${avg}%`, background: color }} />
                       </div>
                     </div>
                   </div>
                   <div className="text-right shrink-0">
-                    <div className="font-black text-sm" style={{ color: barColor }}>{avg.toFixed(0)}%</div>
-                    <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{schoolStudents.length} students</div>
-                    {schoolHotspots.length > 0 && (
-                      <div className="text-xs font-medium" style={{ color: 'var(--lagos-red)' }}>
-                        {schoolHotspots.length} alerts
-                      </div>
-                    )}
+                    <p className="font-black text-sm" style={{ color }}>{avg}%</p>
+                    <p className="text-xs" style={{ color: '#9CA3AF' }}>
+                      {studs.length} stu {hs > 0 && <span style={{ color: '#E30613' }}>· {hs}🔥</span>}
+                    </p>
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
         </div>
 
-        {/* Subject heatmap */}
-        <div className="card mb-6">
-          <h2 className="font-bold text-sm mb-4" style={{ color: 'var(--lagos-blue)' }}>Subject Readiness Heatmap</h2>
+        {/* Subject × School heatmap */}
+        <div className="rounded-2xl overflow-hidden mb-5" style={{ border: '1.5px solid #E5E7EB' }}>
           <div className="overflow-x-auto">
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', background: 'white' }}>
               <thead>
-                <tr style={{ background: 'var(--background)' }}>
-                  <th className="text-left text-xs font-bold px-3 py-2" style={{ color: 'var(--text-muted)' }}>School</th>
-                  {WAEC_SUBJECTS.map((s) => (
-                    <th key={s} className="text-center text-xs font-bold px-2 py-2" style={{ color: 'var(--text-muted)' }}>{s}</th>
+                <tr style={{ background: '#0033A0', color: 'white' }}>
+                  <th className="text-left text-xs font-bold px-3 py-3">Subject</th>
+                  {schools.map((sc) => (
+                    <th key={sc.id} className="text-center text-xs font-bold px-2 py-3">
+                      {sc.name.split(' ').slice(-1)[0].slice(0, 6)}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {schools.map((school) => {
-                  const schoolStudents = studentStore.getBySchool(school.id);
-                  return (
-                    <tr key={school.id}>
-                      <td className="px-3 py-2 text-sm font-medium">{school.name.split(',')[0]}</td>
-                      {WAEC_SUBJECTS.map((subject) => {
-                        const avg = schoolStudents.length > 0
-                          ? schoolStudents.reduce((a, s) => a + getAvg(s.id, subject), 0) / schoolStudents.length
-                          : 0;
-                        const bg = avg >= 75 ? '#D1FAE5' : avg >= 55 ? '#FEF9C3' : '#FEE2E2';
-                        const color = avg >= 75 ? '#065F46' : avg >= 55 ? '#854D0E' : '#991B1B';
-                        return (
-                          <td key={subject} className="px-2 py-2 text-center">
-                            <span className="text-xs font-bold px-2 py-1 rounded-lg" style={{ background: bg, color }}>
-                              {avg.toFixed(0)}%
-                            </span>
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
+                {heatmap.map(({ subject, schools: schoolData }, ri) => (
+                  <tr key={subject} style={{ background: ri % 2 === 0 ? 'white' : '#F9FAFB' }}>
+                    <td className="px-3 py-2 text-xs font-semibold" style={{ color: '#374151', whiteSpace: 'nowrap' }}>
+                      {subject}
+                    </td>
+                    {schoolData.map(({ school, avg }) => {
+                      const bg  = avg >= 75 ? '#DCFCE7' : avg >= 55 ? '#FEF9C3' : avg > 0 ? '#FEE2E2' : '#F3F4F6';
+                      const col = avg >= 75 ? '#008751' : avg >= 55 ? '#854D0E' : avg > 0 ? '#E30613' : '#9CA3AF';
+                      return (
+                        <td key={school.id} className="px-2 py-2 text-center">
+                          <span className="text-xs font-black px-1.5 py-0.5 rounded-full" style={{ background: bg, color: col }}>
+                            {avg > 0 ? `${avg}%` : '—'}
+                          </span>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
         </div>
 
-        {/* Student search */}
-        <div className="card mb-4">
-          <h2 className="font-bold text-sm mb-3" style={{ color: 'var(--lagos-blue)' }}>
-            Search Students ({filteredStudents.length} showing)
+        {/* Student drill-down */}
+        <div className="rounded-2xl p-4" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
+          <h2 className="font-bold text-sm mb-3" style={{ color: '#0033A0' }}>
+            Students ({filteredStudents.length} showing)
+            {selectedSchool && (
+              <button onClick={() => setSelectedSchool('')} className="ml-2 text-xs" style={{ color: '#9CA3AF' }}>
+                · Clear filter ×
+              </button>
+            )}
           </h2>
-          <div className="flex flex-col sm:flex-row gap-3 mb-3">
-            <input className="input flex-1" placeholder='Search by name (e.g. "low math students")...' value={search} onChange={(e) => setSearch(e.target.value)} />
-            <select className="input sm:w-40" value={filterSubject} onChange={(e) => setFilterSubject(e.target.value)}>
-              <option value="">All Subjects</option>
-              {WAEC_SUBJECTS.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-            <select className="input sm:w-36" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as 'all' | 'green' | 'yellow' | 'red')}>
-              <option value="all">All Status</option>
+
+          <div className="flex gap-2 mb-3">
+            <input
+              className="flex-1 rounded-xl px-3 py-2 text-sm"
+              style={{ border: '1.5px solid #E5E7EB' }}
+              placeholder="Search name..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <select
+              className="rounded-xl px-3 py-2 text-xs"
+              style={{ border: '1.5px solid #E5E7EB' }}
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value as 'all' | 'green' | 'yellow' | 'red')}
+            >
+              <option value="all">All</option>
               <option value="green">On Track</option>
               <option value="yellow">Needs Help</option>
               <option value="red">At Risk</option>
             </select>
           </div>
-          <div className="flex flex-col gap-2 max-h-96 overflow-y-auto">
-            {filteredStudents.slice(0, 30).map((student) => {
-              const avg = filterSubject ? getAvg(student.id, filterSubject) : getAvg(student.id);
-              const status = getStatus(student.id);
-              const school = schools.find((sc) => sc.id === student.schoolId);
+
+          <div className="flex flex-col gap-2 max-h-80 overflow-y-auto">
+            {filteredStudents.map((s) => {
+              const avg = getStudentAvg(s.id);
+              const sc  = schools.find((x) => x.id === s.schoolId);
+              const cls = classStore.getById(s.classId);
+              const col = avg >= 75 ? '#008751' : avg >= 55 ? '#FFCC00' : '#E30613';
+              const hs  = hotspotStore.getByStudent(s.id).length;
               return (
-                <div
-                  key={student.id}
-                  className="flex items-center gap-3 p-3 rounded-xl cursor-pointer hover:opacity-80"
-                  style={{ background: 'var(--background)' }}
-                  onClick={() => router.push(`/students/${student.id}`)}
+                <button
+                  key={s.id}
+                  onClick={() => router.push(`/students/${s.id}`)}
+                  className="flex items-center gap-3 p-2 rounded-xl w-full text-left"
+                  style={{ background: '#F9FAFB', border: '1.5px solid #E5E7EB' }}
                 >
                   <div
-                    className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0"
-                    style={{ background: 'var(--lagos-blue-light)', color: 'var(--lagos-blue)' }}
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+                    style={{ background: '#EFF6FF', color: '#0033A0' }}
                   >
-                    {student.name.charAt(0)}
+                    {s.name.charAt(0)}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold">{student.name}</div>
-                    <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{school?.name?.split(',')[0]} · {student.class}</div>
+                    <p className="text-sm font-semibold truncate">{s.name}</p>
+                    <p className="text-xs" style={{ color: '#9CA3AF' }}>
+                      {sc?.name?.split(',')[0]} · {cls?.level}{cls?.section}
+                    </p>
                   </div>
-                  <span
-                    className="text-xs font-black px-2.5 py-1 rounded-full shrink-0"
-                    style={{
-                      background: status === ColorStatus.GREEN ? '#D1FAE5' : status === ColorStatus.YELLOW ? '#FEF9C3' : '#FEE2E2',
-                      color: status === ColorStatus.GREEN ? '#065F46' : status === ColorStatus.YELLOW ? '#854D0E' : '#991B1B',
-                    }}
-                  >
-                    {avg.toFixed(0)}%
-                  </span>
-                </div>
+                  <div className="shrink-0 flex items-center gap-2">
+                    {hs > 0 && <span className="text-xs" style={{ color: '#E30613' }}>🔥{hs}</span>}
+                    <span className="font-black text-sm" style={{ color: col }}>{avg}%</span>
+                  </div>
+                </button>
               );
             })}
           </div>
         </div>
       </main>
+    </div>
+  );
+}
+
+function KPICard({ value, label, color }: { value: string; label: string; color: string }) {
+  return (
+    <div className="rounded-2xl p-3 text-center" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
+      <p className="text-xl font-black leading-none" style={{ color }}>{value}</p>
+      <p className="text-xs mt-1" style={{ color: '#9CA3AF' }}>{label}</p>
     </div>
   );
 }

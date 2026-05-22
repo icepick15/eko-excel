@@ -16,7 +16,7 @@ export default function Home() {
       return;
     }
     if (user.role === Role.TEACHER) router.replace('/dashboard');
-    else if (user.role === Role.HEADTEACHER) router.replace('/school');
+    else if (user.role === Role.HEADTEACHER || user.role === Role.SCHOOLADMIN) router.replace('/school');
     else if (user.role === Role.DISTRICT) router.replace('/district');
     else if (user.role === Role.MINISTRY) router.replace('/ministry');
     else if (user.role === Role.STUDENT) router.replace('/student');

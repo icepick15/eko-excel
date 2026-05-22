@@ -6,10 +6,11 @@
   --lagos-blue-light: #E8EEF9;
   --lagos-green: #008751;
   --lagos-green-light: #E6F3ED;
-  --lagos-gold: #C9943A;
-  --lagos-gold-light: #FBF3E3;
-  --lagos-red: #C0392B;
-  --lagos-red-light: #FDECEB;
+  --lagos-gold: #FFCC00;
+  --lagos-gold-light: #FFFDE7;
+  --lagos-bright-green: #22C55E;
+  --lagos-red: #E30613;
+  --lagos-red-light: #FEE2E2;
   --background: #F4F6FB;
   --foreground: #1A1A2E;
   --surface: #FFFFFF;
@@ -28,6 +29,7 @@
   --color-lagos-green: var(--lagos-green);
   --color-lagos-green-light: var(--lagos-green-light);
   --color-lagos-gold: var(--lagos-gold);
+  --color-lagos-bright-green: var(--lagos-bright-green);
   --color-lagos-red: var(--lagos-red);
   --color-lagos-red-light: var(--lagos-red-light);
   --color-text-muted: var(--text-muted);

@@ -3,332 +3,404 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
-import { Role, ColorStatus, WAEC_SUBJECTS } from '@/lib/types';
-import type { Student, Hotspot } from '@/lib/types';
-import { studentStore, metricsStore, hotspotStore, schoolStore, diaryStore, userStore } from '@/lib/storage';
-import type { User } from '@/lib/types';
-import { recomputeStudent } from '@/lib/calculations';
+import { Role, ColorStatus, CORE_SUBJECTS } from '@/lib/types';
+import type { Student, Class, User } from '@/lib/types';
+import {
+  studentStore, metricsStore, hotspotStore, schoolStore,
+  classStore, userStore, tcsStore, messageStore,
+} from '@/lib/storage';
+import { getTeacherComplianceThisWeek, getClassReadinessAvg, getSchoolReadinessAvg } from '@/lib/calculations';
 import Navbar from '@/components/Navbar';
 
-type SortKey = 'name' | 'readiness' | 'class';
-type FilterStatus = 'all' | 'green' | 'yellow' | 'red';
+function uid(): string {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
+
+type Tab = 'overview' | 'heatmap' | 'teachers' | 'students';
 
 export default function SchoolDashboard() {
   const { user, isLoading } = useAuth();
   const router = useRouter();
 
-  const [students, setStudents] = useState<Student[]>([]);
-  const [hotspots, setHotspots] = useState<Hotspot[]>([]);
-  const [teachers, setTeachers] = useState<User[]>([]);
-  const [search, setSearch] = useState('');
-  const [sort, setSort] = useState<SortKey>('readiness');
-  const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
-  const [filterSubject, setFilterSubject] = useState('');
-  const [computed, setComputed] = useState(false);
+  const [students,   setStudents]   = useState<Student[]>([]);
+  const [classes,    setClasses]    = useState<Class[]>([]);
+  const [teachers,   setTeachers]   = useState<User[]>([]);
   const [schoolName, setSchoolName] = useState('');
+  const [schoolAvg,  setSchoolAvg]  = useState(0);
+  const [activeTab,  setActiveTab]  = useState<Tab>('overview');
+  const [search,     setSearch]     = useState('');
+  const [nudging,    setNudging]    = useState<string | null>(null);
 
   useEffect(() => {
     if (isLoading) return;
     if (!user) { router.replace('/login'); return; }
-    if (user.role !== Role.TEACHER && user.role !== Role.HEADTEACHER) {
-      router.replace('/dashboard'); return;
+
+    const allowed = [Role.HEADTEACHER, Role.SCHOOLADMIN, Role.TEACHER];
+    if (!allowed.includes(user.role)) {
+      if (user.role === Role.STUDENT)   router.replace('/student');
+      else if (user.role === Role.PARENT) router.replace('/parent');
+      else if (user.role === Role.DISTRICT) router.replace('/district');
+      else if (user.role === Role.MINISTRY) router.replace('/ministry');
+      else router.replace('/dashboard');
+      return;
     }
 
-    const school = schoolStore.getById(user.schoolId!);
+    const sId = user.schoolId ?? '';
+    const school = schoolStore.getById(sId);
     setSchoolName(school?.name ?? 'School');
 
-    const myStudents = studentStore.getBySchool(user.schoolId!);
+    const myStudents = studentStore.getBySchool(sId);
     setStudents(myStudents);
 
-    if (!computed) {
-      myStudents.forEach((s) => recomputeStudent(s.id));
-      setComputed(true);
-    }
+    const myClasses = classStore.getBySchool(sId);
+    setClasses(myClasses);
 
-    setHotspots(hotspotStore.getBySchool(user.schoolId!));
+    const myTeachers = userStore.getTeachers(sId);
+    setTeachers(myTeachers);
 
-    if (user.role === Role.HEADTEACHER) {
-      setTeachers(userStore.getBySchool(user.schoolId!).filter((u) => u.role === Role.TEACHER));
-    }
-  }, [user, isLoading, computed, router]);
+    setSchoolAvg(getSchoolReadinessAvg(sId));
+  }, [user, isLoading, router]);
 
-  function getTeacherCompliance(teacherId: string) {
-    const diaries = diaryStore.getByTeacher(teacherId);
-    const today = new Date().toDateString();
-    const submittedToday = diaries.some((d) => new Date(d.createdAt).toDateString() === today);
-    const last7 = diaries.filter((d) => {
-      const days = (Date.now() - new Date(d.createdAt).getTime()) / 86400000;
-      return days <= 7;
-    }).length;
-    const lastDate = diaries[0]?.createdAt
-      ? new Date(diaries[0].createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })
-      : 'Never';
-    return { submittedToday, last7, lastDate };
-  }
+  if (isLoading) return null;
+  if (!user) return null;
 
-  function getAvgReadiness(studentId: string, subject?: string): number {
-    const metrics = metricsStore.getByStudent(studentId);
-    const filtered = subject ? metrics.filter((m) => m.subject === subject) : metrics;
-    if (filtered.length === 0) return 0;
-    return filtered.reduce((a, m) => a + m.readinessScore, 0) / filtered.length;
-  }
+  const schoolId = user.schoolId ?? '';
+  const atRisk  = students.filter((s) => metricsStore.getByStudent(s.id).some((m) => m.colorStatus === ColorStatus.RED)).length;
+  const onTrack = students.filter((s) => metricsStore.getByStudent(s.id).every((m) => m.colorStatus !== ColorStatus.RED)).length;
+  const hotspotCount = hotspotStore.getBySchool(schoolId).length;
 
-  function getStatus(studentId: string, subject?: string): ColorStatus {
-    const avg = getAvgReadiness(studentId, subject);
-    return avg >= 75 ? ColorStatus.GREEN : avg >= 55 ? ColorStatus.YELLOW : ColorStatus.RED;
-  }
+  // Teacher compliance
+  const teacherStats = teachers.map((t) => ({
+    teacher: t,
+    compliance: getTeacherComplianceThisWeek(t.id),
+    tcs: tcsStore.getByTeacher(t.id),
+  }));
 
-  const processedStudents = students
-    .filter((s) => !search || s.name.toLowerCase().includes(search.toLowerCase()) || s.class.toLowerCase().includes(search.toLowerCase()))
-    .filter((s) => filterStatus === 'all' || getStatus(s.id, filterSubject || undefined) === filterStatus)
-    .sort((a, b) => {
-      if (sort === 'name') return a.name.localeCompare(b.name);
-      if (sort === 'class') return a.class.localeCompare(b.class);
-      return getAvgReadiness(b.id) - getAvgReadiness(a.id);
+  function sendNudge(teacherId: string, teacherName: string) {
+    if (!user) return;
+    setNudging(teacherId);
+    messageStore.save({
+      id: uid(),
+      fromUserId: user.id,
+      fromRole: user.role,
+      fromName: user.name,
+      toUserId: teacherId,
+      subject: 'Diary Submission Reminder',
+      body: `Dear ${teacherName.split(' ').pop()}, please ensure your class diary is submitted daily. This week's compliance is below the 90% target. Thank you.`,
+      severity: 'warning',
+      isRead: false,
+      sentAt: new Date().toISOString(),
     });
+    setTimeout(() => setNudging(null), 800);
+    alert(`Nudge sent to ${teacherName}`);
+  }
 
-  const greenCount = students.filter((s) => getStatus(s.id) === ColorStatus.GREEN).length;
-  const yellowCount = students.filter((s) => getStatus(s.id) === ColorStatus.YELLOW).length;
-  const redCount = students.filter((s) => getStatus(s.id) === ColorStatus.RED).length;
+  // Subject × Class heatmap data
+  const heatmapData = CORE_SUBJECTS.map((subject) => ({
+    subject,
+    classes: classes.map((cls) => {
+      const classStudents = studentStore.getByClass(cls.id);
+      if (classStudents.length === 0) return { cls, avg: 0 };
+      const scores = classStudents
+        .map((s) => metricsStore.getByStudent(s.id).find((m) => m.subject === subject)?.readinessScore ?? 0);
+      const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+      return { cls, avg: Math.round(avg) };
+    }),
+  }));
 
-  const STATUS_CONFIG: Record<FilterStatus, { color: string; bg: string; label: string }> = {
-    all: { color: 'var(--lagos-blue)', bg: 'var(--lagos-blue-light)', label: 'All' },
-    green: { color: 'var(--lagos-green)', bg: 'var(--lagos-green-light)', label: 'On Track' },
-    yellow: { color: 'var(--lagos-gold)', bg: '#FEF9C3', label: 'Watch' },
-    red: { color: 'var(--lagos-red)', bg: '#FEE2E2', label: 'At Risk' },
+  const filteredStudents = students.filter((s) =>
+    !search || s.name.toLowerCase().includes(search.toLowerCase())
+  ).sort((a, b) => {
+    const aAvg = metricsStore.getByStudent(a.id).reduce((s, m) => s + m.readinessScore, 0) / (metricsStore.getByStudent(a.id).length || 1);
+    const bAvg = metricsStore.getByStudent(b.id).reduce((s, m) => s + m.readinessScore, 0) / (metricsStore.getByStudent(b.id).length || 1);
+    return aAvg - bAvg; // worst first
+  });
+
+  const TAB_LABELS: Record<Tab, string> = {
+    overview: 'Overview',
+    heatmap:  'Heatmap',
+    teachers: 'Teachers',
+    students: 'Students',
   };
 
   return (
-    <div className="min-h-screen" style={{ background: 'var(--background)' }}>
+    <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
       <Navbar />
 
-      <main className="max-w-7xl mx-auto px-4 py-8">
+      <main className="max-w-4xl mx-auto px-4 py-5 pb-10">
         {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--lagos-blue)' }}>{schoolName}</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>School Overview · {students.length} Students</p>
+        <div className="mb-5">
+          <button onClick={() => router.back()} className="text-sm font-medium mb-2" style={{ color: '#0033A0' }}>←</button>
+          <h1 className="text-xl font-black" style={{ color: '#0033A0' }}>{schoolName}</h1>
+          <p className="text-sm" style={{ color: '#6B7280' }}>
+            {students.length} students · {classes.length} classes · {teachers.length} teachers
+          </p>
         </div>
 
-        {/* Stats summary */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <div className="card text-center">
-            <div className="text-2xl font-black mb-1" style={{ color: 'var(--lagos-blue)' }}>{students.length}</div>
-            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Total Students</div>
-          </div>
-          <div className="card text-center">
-            <div className="text-2xl font-black mb-1" style={{ color: 'var(--lagos-green)' }}>{greenCount}</div>
-            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>On Track</div>
-          </div>
-          <div className="card text-center">
-            <div className="text-2xl font-black mb-1" style={{ color: 'var(--lagos-gold)' }}>{yellowCount}</div>
-            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Needs Attention</div>
-          </div>
-          <div className="card text-center">
-            <div className="text-2xl font-black mb-1" style={{ color: 'var(--lagos-red)' }}>{redCount}</div>
-            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>At Risk</div>
-          </div>
+        {/* KPI strip */}
+        <div className="grid grid-cols-4 gap-3 mb-5">
+          <KPICard value={`${schoolAvg}%`}  label="School Avg"   color={schoolAvg >= 75 ? '#008751' : schoolAvg >= 55 ? '#FFCC00' : '#E30613'} />
+          <KPICard value={String(atRisk)}    label="At-Risk"      color={atRisk > 0 ? '#E30613' : '#008751'} />
+          <KPICard value={String(hotspotCount)} label="Hotspots"  color={hotspotCount > 0 ? '#E30613' : '#008751'} />
+          <KPICard value={String(teachers.filter((t) => getTeacherComplianceThisWeek(t.id).rate >= 90).length) + '/' + teachers.length}
+            label="Compliant" color="#0033A0" />
         </div>
 
-        {/* Hotspots section */}
-        {hotspots.length > 0 && (
-          <div id="hotspots" className="card mb-6">
-            <h2 className="font-bold text-sm mb-3" style={{ color: 'var(--lagos-red)' }}>
-              ⚠ Active Hotspots ({hotspots.length})
-            </h2>
-            <div className="grid sm:grid-cols-2 gap-2">
-              {hotspots.slice(0, 6).map((h) => {
-                const s = studentStore.getById(h.studentId);
-                return (
-                  <div
-                    key={h.id}
-                    className="flex items-center gap-2 p-3 rounded-xl cursor-pointer hover:opacity-80"
-                    style={{
-                      background: h.severity === 'critical' ? '#FEE2E2' : h.severity === 'high' ? '#FEF9C3' : 'var(--lagos-blue-light)',
-                    }}
-                    onClick={() => router.push(`/students/${h.studentId}`)}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-xs">{s?.name}</div>
-                      <div className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>{h.description}</div>
-                    </div>
-                    <span
-                      className="text-xs px-1.5 py-0.5 rounded font-bold capitalize shrink-0"
-                      style={{
-                        background: h.severity === 'critical' ? 'var(--lagos-red)' : h.severity === 'high' ? 'var(--lagos-gold)' : 'var(--lagos-blue)',
-                        color: 'white',
-                      }}
-                    >
-                      {h.severity}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Teacher Compliance — HeadTeacher only */}
-        {user?.role === Role.HEADTEACHER && teachers.length > 0 && (
-          <div className="card mb-6">
-            <h2 className="font-bold text-sm mb-4" style={{ color: 'var(--lagos-blue)' }}>
-              Teacher Compliance Tracker
-            </h2>
-            <div className="flex flex-col gap-2">
-              {teachers.map((teacher) => {
-                const { submittedToday, last7, lastDate } = getTeacherCompliance(teacher.id);
-                return (
-                  <div key={teacher.id} className="flex items-center gap-3 p-3 rounded-xl" style={{ background: 'var(--background)' }}>
-                    <div
-                      className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm shrink-0"
-                      style={{ background: 'var(--lagos-blue-light)', color: 'var(--lagos-blue)' }}
-                    >
-                      {teacher.name.charAt(0)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-sm">{teacher.name}</div>
-                      <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                        Last diary: {lastDate} · {last7} entries this week
-                      </div>
-                    </div>
-                    <span
-                      className="text-xs px-2 py-1 rounded-full font-bold shrink-0"
-                      style={{
-                        background: submittedToday ? 'var(--lagos-green-light)' : '#FEE2E2',
-                        color: submittedToday ? 'var(--lagos-green)' : 'var(--lagos-red)',
-                      }}
-                    >
-                      {submittedToday ? '✓ Today' : '✗ Pending'}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Filters + Search */}
-        <div className="card mb-4">
-          <div className="flex flex-col sm:flex-row gap-3">
-            <input
-              className="input flex-1"
-              placeholder="Search students by name or class..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            <select className="input sm:w-40" value={filterSubject} onChange={(e) => setFilterSubject(e.target.value)}>
-              <option value="">All Subjects</option>
-              {WAEC_SUBJECTS.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-            <select className="input sm:w-32" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
-              <option value="readiness">By Readiness</option>
-              <option value="name">By Name</option>
-              <option value="class">By Class</option>
-            </select>
-          </div>
-          {/* Status filter pills */}
-          <div className="flex gap-2 mt-3 flex-wrap">
-            {(['all', 'green', 'yellow', 'red'] as FilterStatus[]).map((status) => (
-              <button
-                key={status}
-                onClick={() => setFilterStatus(status)}
-                className="text-xs px-3 py-1.5 rounded-full font-semibold transition-all"
-                style={{
-                  background: filterStatus === status ? STATUS_CONFIG[status].color : STATUS_CONFIG[status].bg,
-                  color: filterStatus === status ? 'white' : STATUS_CONFIG[status].color,
-                }}
-              >
-                {STATUS_CONFIG[status].label}
-                {status !== 'all' && (
-                  <span className="ml-1.5 opacity-70">
-                    ({status === 'green' ? greenCount : status === 'yellow' ? yellowCount : redCount})
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
+        {/* Tabs */}
+        <div className="flex gap-1 p-1 rounded-xl mb-5" style={{ background: '#E5E7EB' }}>
+          {(Object.keys(TAB_LABELS) as Tab[]).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className="flex-1 py-2 rounded-lg text-xs font-bold transition-all"
+              style={{
+                background: activeTab === tab ? 'white' : 'transparent',
+                color: activeTab === tab ? '#0033A0' : '#6B7280',
+                boxShadow: activeTab === tab ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              }}
+            >
+              {TAB_LABELS[tab]}
+            </button>
+          ))}
         </div>
 
-        {/* Student table */}
-        <div className="card overflow-hidden p-0">
-          <div className="overflow-x-auto">
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ background: 'var(--lagos-blue)', color: 'white' }}>
-                  <th className="text-left text-xs font-bold px-4 py-3">Student</th>
-                  <th className="text-left text-xs font-bold px-4 py-3">Class</th>
-                  {WAEC_SUBJECTS.map((s) => (
-                    <th key={s} className="text-center text-xs font-bold px-2 py-3">{s.slice(0, 4)}.</th>
-                  ))}
-                  <th className="text-center text-xs font-bold px-4 py-3">Overall</th>
-                </tr>
-              </thead>
-              <tbody>
-                {processedStudents.map((student, idx) => {
-                  const metrics = metricsStore.getByStudent(student.id);
-                  const avg = getAvgReadiness(student.id);
-                  const status = getStatus(student.id);
+        {/* ── Overview Tab ─────────────────────────────────────────────── */}
+        {activeTab === 'overview' && (
+          <div>
+            {/* Class readiness summary */}
+            <div className="rounded-2xl p-4 mb-4" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
+              <h3 className="font-bold text-sm mb-3" style={{ color: '#0033A0' }}>Class Readiness</h3>
+              <div className="flex flex-col gap-2">
+                {classes.map((cls) => {
+                  const avg = getClassReadinessAvg(cls.id);
+                  const color = avg >= 75 ? '#008751' : avg >= 55 ? '#FFCC00' : '#E30613';
+                  const studs = studentStore.getByClass(cls.id);
                   return (
-                    <tr
-                      key={student.id}
-                      className="cursor-pointer hover:opacity-80 transition-opacity"
-                      style={{ background: idx % 2 === 0 ? 'white' : 'var(--background)' }}
-                      onClick={() => router.push(`/students/${student.id}`)}
-                    >
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <div
-                            className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-                            style={{ background: 'var(--lagos-blue-light)', color: 'var(--lagos-blue)' }}
-                          >
-                            {student.name.charAt(0)}
-                          </div>
-                          <span className="text-sm font-medium">{student.name}</span>
+                    <div key={cls.id} className="flex items-center gap-3">
+                      <div className="w-16 text-xs font-bold" style={{ color: '#0033A0' }}>
+                        {cls.level}{cls.section}
+                      </div>
+                      <div className="flex-1 h-3 rounded-full overflow-hidden" style={{ background: '#F3F4F6' }}>
+                        <div className="h-3 rounded-full" style={{ width: `${avg}%`, background: color }} />
+                      </div>
+                      <div className="text-xs font-black w-10 text-right" style={{ color }}>{avg}%</div>
+                      <div className="text-xs w-16 text-right" style={{ color: '#9CA3AF' }}>{studs.length} stu</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Top hotspots */}
+            {hotspotStore.getBySchool(schoolId).slice(0, 5).length > 0 && (
+              <div className="rounded-2xl p-4 mb-4" style={{ background: 'white', border: '1.5px solid #FECACA' }}>
+                <h3 className="font-bold text-sm mb-3" style={{ color: '#E30613' }}>
+                  Active Hotspots ({hotspotCount})
+                </h3>
+                <div className="flex flex-col gap-2">
+                  {hotspotStore.getBySchool(schoolId).slice(0, 5).map((h) => {
+                    const stu = studentStore.getById(h.studentId);
+                    const cls = stu ? classStore.getById(stu.classId) : null;
+                    return (
+                      <button
+                        key={h.id}
+                        onClick={() => router.push(`/students/${h.studentId}`)}
+                        className="flex items-center gap-3 w-full text-left"
+                      >
+                        <span className="text-base">{h.severity === 'critical' ? '🔴' : h.severity === 'high' ? '🟠' : '🟡'}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold truncate">{stu?.name}</p>
+                          <p className="text-xs" style={{ color: '#9CA3AF' }}>
+                            {cls?.level}{cls?.section} · {h.subject} · {(h.readinessScore ?? 0).toFixed(0)}%
+                          </p>
                         </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                <button
+                  onClick={() => router.push('/hotspots')}
+                  className="text-xs font-semibold mt-3"
+                  style={{ color: '#0033A0' }}
+                >
+                  View all →
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Heatmap Tab ──────────────────────────────────────────────── */}
+        {activeTab === 'heatmap' && (
+          <div className="rounded-2xl overflow-hidden" style={{ border: '1.5px solid #E5E7EB' }}>
+            <div className="overflow-x-auto">
+              <table style={{ width: '100%', borderCollapse: 'collapse', background: 'white' }}>
+                <thead>
+                  <tr style={{ background: '#0033A0', color: 'white' }}>
+                    <th className="text-left text-xs font-bold px-3 py-3">Subject</th>
+                    {classes.map((cls) => (
+                      <th key={cls.id} className="text-center text-xs font-bold px-2 py-3">
+                        {cls.level}{cls.section}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {heatmapData.map(({ subject, classes: clsData }, ri) => (
+                    <tr key={subject} style={{ background: ri % 2 === 0 ? 'white' : '#F9FAFB' }}>
+                      <td className="px-3 py-2.5 text-xs font-semibold" style={{ color: '#374151', whiteSpace: 'nowrap' }}>
+                        {subject}
                       </td>
-                      <td className="px-4 py-3 text-xs font-medium" style={{ color: 'var(--text-muted)' }}>{student.class}</td>
-                      {WAEC_SUBJECTS.map((subject) => {
-                        const m = metrics.find((x) => x.subject === subject);
-                        const score = m?.readinessScore ?? 0;
-                        const sc = m?.colorStatus ?? ColorStatus.RED;
+                      {clsData.map(({ cls, avg }) => {
+                        const bg  = avg >= 75 ? '#DCFCE7' : avg >= 55 ? '#FEF9C3' : avg > 0 ? '#FEE2E2' : '#F3F4F6';
+                        const col = avg >= 75 ? '#008751' : avg >= 55 ? '#854D0E' : avg > 0 ? '#E30613' : '#9CA3AF';
                         return (
-                          <td key={subject} className="px-2 py-3 text-center">
+                          <td key={cls.id} className="px-2 py-2.5 text-center">
                             <span
-                              className="text-xs font-bold px-2 py-0.5 rounded-full"
-                              style={{
-                                background: sc === ColorStatus.GREEN ? '#D1FAE5' : sc === ColorStatus.YELLOW ? '#FEF9C3' : '#FEE2E2',
-                                color: sc === ColorStatus.GREEN ? '#065F46' : sc === ColorStatus.YELLOW ? '#854D0E' : '#991B1B',
-                              }}
+                              className="text-xs font-black px-2 py-0.5 rounded-full"
+                              style={{ background: bg, color: col }}
                             >
-                              {score.toFixed(0)}
+                              {avg > 0 ? `${avg}%` : '—'}
                             </span>
                           </td>
                         );
                       })}
-                      <td className="px-4 py-3 text-center">
-                        <span
-                          className="text-sm font-black px-3 py-1 rounded-full"
-                          style={{
-                            background: status === ColorStatus.GREEN ? '#D1FAE5' : status === ColorStatus.YELLOW ? '#FEF9C3' : '#FEE2E2',
-                            color: status === ColorStatus.GREEN ? '#065F46' : status === ColorStatus.YELLOW ? '#854D0E' : '#991B1B',
-                          }}
-                        >
-                          {avg.toFixed(0)}%
-                        </span>
-                      </td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          {processedStudents.length === 0 && (
-            <div className="text-center py-10" style={{ color: 'var(--text-muted)' }}>
-              <div className="text-2xl mb-2">🔍</div>
-              <div className="text-sm">No students match your filters</div>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          )}
-        </div>
+          </div>
+        )}
+
+        {/* ── Teachers Tab ─────────────────────────────────────────────── */}
+        {activeTab === 'teachers' && (
+          <div className="flex flex-col gap-3">
+            {teacherStats.map(({ teacher, compliance, tcs }) => {
+              const compColor = compliance.rate >= 90 ? '#008751' : compliance.rate >= 70 ? '#FFCC00' : '#E30613';
+              return (
+                <div
+                  key={teacher.id}
+                  className="rounded-2xl p-4"
+                  style={{ background: 'white', border: '1.5px solid #E5E7EB' }}
+                >
+                  <div className="flex items-center gap-3 mb-3">
+                    <div
+                      className="w-10 h-10 rounded-full flex items-center justify-center font-black text-sm shrink-0"
+                      style={{ background: '#EFF6FF', color: '#0033A0' }}
+                    >
+                      {teacher.name.charAt(0)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-sm truncate" style={{ color: '#111827' }}>{teacher.name}</p>
+                      <p className="text-xs" style={{ color: '#9CA3AF' }}>
+                        {tcs.map((t) => `${classStore.getById(t.classId)?.level ?? '?'}${classStore.getById(t.classId)?.section ?? ''} ${t.subject}`).join(' · ')}
+                      </p>
+                    </div>
+                    <div className="text-center shrink-0">
+                      <p className="text-lg font-black" style={{ color: compColor }}>{compliance.rate}%</p>
+                      <p className="text-xs" style={{ color: '#9CA3AF' }}>compliance</p>
+                    </div>
+                  </div>
+
+                  {/* Compliance bar */}
+                  <div className="h-2 rounded-full overflow-hidden mb-3" style={{ background: '#F3F4F6' }}>
+                    <div className="h-2 rounded-full" style={{ width: `${compliance.rate}%`, background: compColor }} />
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs" style={{ color: '#6B7280' }}>
+                      {compliance.submitted}/{compliance.required} diaries this week
+                    </p>
+                    <div className="flex gap-2">
+                      {compliance.rate < 90 && (
+                        <button
+                          onClick={() => sendNudge(teacher.id, teacher.name)}
+                          disabled={nudging === teacher.id}
+                          className="text-xs font-bold px-2 py-1 rounded-lg"
+                          style={{ background: '#FEF9C3', color: '#854D0E' }}
+                        >
+                          {nudging === teacher.id ? 'Sent!' : '🔔 Nudge'}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => router.push('/messages')}
+                        className="text-xs font-bold px-2 py-1 rounded-lg"
+                        style={{ background: '#EFF6FF', color: '#0033A0' }}
+                      >
+                        ✉ Message
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {teachers.length === 0 && (
+              <div className="text-center py-12 rounded-2xl" style={{ background: 'white' }}>
+                <p className="text-2xl mb-2">👩‍🏫</p>
+                <p className="text-sm" style={{ color: '#6B7280' }}>No teachers found</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Students Tab ─────────────────────────────────────────────── */}
+        {activeTab === 'students' && (
+          <div>
+            <input
+              className="w-full rounded-xl px-4 py-3 text-sm mb-4"
+              style={{ border: '1.5px solid #E5E7EB', background: 'white' }}
+              placeholder="Search students..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <div className="flex flex-col gap-2">
+              {filteredStudents.map((s) => {
+                const ms  = metricsStore.getByStudent(s.id);
+                const avg = ms.length > 0 ? Math.round(ms.reduce((a, m) => a + m.readinessScore, 0) / ms.length) : 0;
+                const col = avg >= 75 ? '#008751' : avg >= 55 ? '#FFCC00' : '#E30613';
+                const cls = classStore.getById(s.classId);
+                const hs  = hotspotStore.getByStudent(s.id).length;
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => router.push(`/students/${s.id}`)}
+                    className="w-full text-left flex items-center gap-3 p-3 rounded-xl"
+                    style={{ background: 'white', border: '1.5px solid #E5E7EB' }}
+                  >
+                    <div
+                      className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm shrink-0"
+                      style={{ background: '#EFF6FF', color: '#0033A0' }}
+                    >
+                      {s.name.split(' ').map((n) => n[0]).slice(0, 2).join('')}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm truncate" style={{ color: '#111827' }}>{s.name}</p>
+                      <p className="text-xs" style={{ color: '#9CA3AF' }}>
+                        {cls?.level}{cls?.section} · {s.gender === 'M' ? 'Male' : 'Female'}
+                        {hs > 0 && <span style={{ color: '#E30613' }}> · {hs} hotspot{hs > 1 ? 's' : ''}</span>}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="font-black text-base" style={{ color: col }}>{avg}%</p>
+                      <p className="text-xs" style={{ color: '#9CA3AF' }}>avg</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </main>
+    </div>
+  );
+}
+
+function KPICard({ value, label, color }: { value: string; label: string; color: string }) {
+  return (
+    <div className="rounded-2xl p-3 text-center" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
+      <p className="text-xl font-black leading-none" style={{ color }}>{value}</p>
+      <p className="text-xs mt-1" style={{ color: '#9CA3AF' }}>{label}</p>
     </div>
   );
 }

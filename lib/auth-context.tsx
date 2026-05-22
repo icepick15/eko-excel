@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { User } from './types';
 import { auth } from './storage';
-import { seedData, seedExtended } from './seed';
+import { seedData, seedQuestions } from './seed';
 
 interface AuthContextValue {
   user: User | null;
@@ -20,7 +20,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     seedData();
-    seedExtended();
+    seedQuestions();
     const current = auth.current();
     setUser(current);
     setIsLoading(false);
@@ -28,7 +28,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   function login(phone: string): { success: boolean; error?: string } {
     const found = auth.login(phone);
-    if (!found) return { success: false, error: 'Phone number not found. Try: 08012345678' };
+    if (!found) return { success: false, error: 'Phone number not found. Try a demo account below.' };
     auth.setCurrentUser(found);
     setUser(found);
     return { success: true };

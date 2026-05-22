@@ -3,228 +3,405 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
-import { Role, ColorStatus, WAEC_SUBJECTS } from '@/lib/types';
-import type { Student, ReadinessMetric, Hotspot } from '@/lib/types';
-import { studentStore, metricsStore, hotspotStore, diaryStore, schoolStore } from '@/lib/storage';
-import { recomputeStudent } from '@/lib/calculations';
+import { Role, CORE_SUBJECTS } from '@/lib/types';
+import type { Student, Message } from '@/lib/types';
+import {
+  studentStore, metricsStore, hotspotStore, diaryStore,
+  schoolStore, classStore, attendanceStore, messageStore,
+} from '@/lib/storage';
 import Navbar from '@/components/Navbar';
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+function lastFriday(): string {
+  const d = new Date();
+  const dow = d.getDay(); // 0=Sun … 6=Sat
+  // days back to reach Friday: Sun=2, Mon=3, Tue=4, Wed=5, Thu=6, Fri=0, Sat=1
+  const back = dow === 5 ? 0 : dow === 6 ? 1 : dow + 2;
+  d.setDate(d.getDate() - back);
+  return d.toLocaleDateString('en-NG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+function attendanceRate(studentId: string, classId: string): number {
+  const diaries = diaryStore.getByClass(classId).slice(0, 20);
+  if (diaries.length === 0) return 100;
+  const present = diaries.filter((d) => (d.presentStudentIds ?? []).includes(studentId)).length;
+  return Math.round((present / diaries.length) * 100);
+}
+
+// ── component ─────────────────────────────────────────────────────────────────
 
 export default function ParentDashboard() {
   const { user, isLoading } = useAuth();
   const router = useRouter();
 
-  const [student, setStudent] = useState<Student | null>(null);
-  const [metrics, setMetrics] = useState<ReadinessMetric[]>([]);
-  const [hotspots, setHotspots] = useState<Hotspot[]>([]);
-  const [schoolName, setSchoolName] = useState('');
-  const [attendanceRate, setAttendanceRate] = useState(0);
-  const [reportDate] = useState(() => {
-    // Show "last Friday" as the report date
-    const d = new Date();
-    const day = d.getDay();
-    const diff = day === 5 ? 0 : day === 6 ? 1 : day + 2;
-    d.setDate(d.getDate() - diff);
-    return d.toLocaleDateString('en-NG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-  });
+  const [children, setChildren]           = useState<Student[]>([]);
+  const [activeIdx, setActiveIdx]         = useState(0);
+  const [messages, setMessages]           = useState<Message[]>([]);
+  const [activeThread, setActiveThread]   = useState<Message | null>(null);
+  const [replyText, setReplyText]         = useState('');
+  const [view, setView]                   = useState<'report' | 'messages'>('report');
+
+  const reportDate = lastFriday();
 
   useEffect(() => {
     if (isLoading) return;
-    if (!user) { router.replace('/login'); return; }
+    if (!user)                { router.replace('/login'); return; }
     if (user.role !== Role.PARENT) { router.replace('/login'); return; }
-    if (!user.childId) { router.replace('/login'); return; }
 
-    recomputeStudent(user.childId);
+    const ids = user.childIds ?? [];
+    if (ids.length === 0)     { router.replace('/login'); return; }
 
-    const s = studentStore.getById(user.childId);
-    if (!s) { router.replace('/login'); return; }
-    setStudent(s);
-
-    const school = schoolStore.getById(s.schoolId);
-    setSchoolName(school?.name ?? 'School');
-
-    setMetrics(metricsStore.getByStudent(user.childId));
-    setHotspots(hotspotStore.getByStudent(user.childId));
-
-    // Attendance rate from last 10 diary entries
-    const diaries = diaryStore.getByStudent(user.childId).slice(0, 10);
-    if (diaries.length > 0) {
-      const rate = diaries.filter((d) => d.attendance.includes(user.childId!)).length / diaries.length;
-      setAttendanceRate(Math.round(rate * 100));
-    } else {
-      setAttendanceRate(100);
-    }
+    const kids = ids.map((id) => studentStore.getById(id)).filter(Boolean) as Student[];
+    setChildren(kids);
+    setMessages(messageStore.getForUser(user.id));
   }, [user, isLoading, router]);
 
-  if (isLoading || !student) {
+  if (isLoading || children.length === 0) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--lagos-blue)' }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#0033A0' }}>
         <div className="text-white text-center">
           <div className="text-xl font-bold mb-2">Eko Excel</div>
-          <div className="text-blue-200 text-sm animate-pulse">Loading report...</div>
+          <div className="text-sm" style={{ color: '#BFDBFE' }}>Loading report…</div>
         </div>
       </div>
     );
   }
 
-  const avgReadiness = metrics.length > 0
-    ? metrics.reduce((a, m) => a + m.readinessScore, 0) / metrics.length
-    : 0;
-  const overallStatus = avgReadiness >= 75 ? ColorStatus.GREEN : avgReadiness >= 55 ? ColorStatus.YELLOW : ColorStatus.RED;
-  const statusLabel = overallStatus === ColorStatus.GREEN ? 'On Track' : overallStatus === ColorStatus.YELLOW ? 'Needs Support' : 'At Risk';
-  const statusColor = overallStatus === ColorStatus.GREEN ? 'var(--lagos-green)' : overallStatus === ColorStatus.YELLOW ? 'var(--lagos-gold)' : 'var(--lagos-red)';
-  const statusBg = overallStatus === ColorStatus.GREEN ? 'var(--lagos-green-light)' : overallStatus === ColorStatus.YELLOW ? '#FEF9C3' : '#FEE2E2';
-  const criticalHotspots = hotspots.filter((h) => h.severity === 'critical');
+  const child = children[activeIdx];
+  const cls   = classStore.getById(child.classId);
+  const school = schoolStore.getById(child.schoolId);
+  const subjectMetrics = metricsStore.getByStudent(child.id);
+  const hotspots = hotspotStore.getByStudent(child.id).filter((h) => !h.resolvedAt);
+  const attend   = attendanceRate(child.id, child.classId);
 
+  const overallAvg = subjectMetrics.length > 0
+    ? Math.round(subjectMetrics.reduce((a, m) => a + m.readinessScore, 0) / subjectMetrics.length)
+    : 0;
+
+  const statusColor = overallAvg >= 75 ? '#008751' : overallAvg >= 55 ? '#FFCC00' : '#E30613';
+  const statusLabel = overallAvg >= 75 ? 'On Track' : overallAvg >= 55 ? 'Needs Support' : 'At Risk';
+  const criticalHs  = hotspots.filter((h) => h.severity === 'critical');
+
+  const unreadCount = messages.filter((m) => !m.isRead).length;
+
+  function openThread(msg: Message) {
+    messageStore.markRead(msg.id);
+    setMessages((prev) => prev.map((m) => m.id === msg.id ? { ...m, isRead: true } : m));
+    setActiveThread({ ...msg, isRead: true });
+  }
+
+  function sendReply() {
+    if (!activeThread || !replyText.trim() || !user) return;
+    const reply = {
+      id: `reply-${Date.now()}`,
+      fromUserId: user.id,
+      fromName: user.name,
+      body: replyText.trim(),
+      sentAt: new Date().toISOString(),
+    };
+    messageStore.addReply(activeThread.id, reply);
+    setActiveThread((prev) => prev ? { ...prev, replies: [...(prev.replies ?? []), reply] } : prev);
+    setReplyText('');
+  }
+
+  // ── THREAD VIEW ─────────────────────────────────────────────────────────────
+  if (activeThread) {
+    return (
+      <div className="min-h-screen flex flex-col" style={{ background: '#F5F7FA' }}>
+        <Navbar />
+        <div className="max-w-2xl mx-auto w-full px-4 py-4 flex flex-col flex-1">
+          <button onClick={() => setActiveThread(null)} className="flex items-center gap-1 text-sm mb-4" style={{ color: '#0033A0' }}>
+            ← Back
+          </button>
+          <div className="rounded-2xl p-4 mb-4" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
+            <p className="font-bold text-sm" style={{ color: '#0033A0' }}>{activeThread.subject}</p>
+            <p className="text-xs mt-0.5" style={{ color: '#9CA3AF' }}>
+              From {activeThread.fromName} · {new Date(activeThread.sentAt).toLocaleDateString('en-NG')}
+            </p>
+            <p className="text-sm mt-3" style={{ color: '#111827' }}>{activeThread.body}</p>
+          </div>
+
+          {/* Replies */}
+          {(activeThread.replies ?? []).map((r) => (
+            <div
+              key={r.id}
+              className={`max-w-xs rounded-2xl px-4 py-2 mb-2 text-sm ${r.fromUserId === user?.id ? 'ml-auto' : 'mr-auto'}`}
+              style={{
+                background: r.fromUserId === user?.id ? '#0033A0' : '#F3F4F6',
+                color: r.fromUserId === user?.id ? 'white' : '#111827',
+              }}
+            >
+              <p>{r.body}</p>
+              <p className="text-xs mt-1 opacity-60">{r.fromName}</p>
+            </div>
+          ))}
+
+          {/* Reply box */}
+          <div className="flex gap-2 mt-4">
+            <input
+              className="flex-1 rounded-xl px-3 py-2 text-sm"
+              style={{ border: '1.5px solid #E5E7EB' }}
+              placeholder="Reply to teacher…"
+              value={replyText}
+              onChange={(e) => setReplyText(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && sendReply()}
+            />
+            <button
+              onClick={sendReply}
+              disabled={!replyText.trim()}
+              className="px-4 py-2 rounded-xl text-sm font-bold"
+              style={{ background: '#0033A0', color: 'white', opacity: replyText.trim() ? 1 : 0.4 }}
+            >
+              Send
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── MAIN DASHBOARD ──────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen" style={{ background: 'var(--background)' }}>
+    <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
       <Navbar />
 
-      <main className="max-w-2xl mx-auto px-4 py-8">
-        {/* Parent greeting */}
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--lagos-blue)' }}>
-            Welcome, {user?.name.split(' ')[1]}
+      <main className="max-w-2xl mx-auto px-4 py-5 pb-10">
+        {/* Header */}
+        <div className="mb-4">
+          <p className="text-xs font-bold" style={{ color: '#9CA3AF' }}>Parent Portal</p>
+          <h1 className="text-xl font-black" style={{ color: '#0033A0' }}>
+            Welcome, {user?.name.split(' ').slice(-1)[0]}
           </h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-            Weekly report for <strong>{student.name}</strong> · {schoolName}
-          </p>
         </div>
 
-        {/* Critical alert banner */}
-        {criticalHotspots.length > 0 && (
-          <div className="rounded-xl p-4 mb-6 flex items-start gap-3" style={{ background: '#FEE2E2', border: '1px solid #FCA5A5' }}>
-            <span className="text-2xl shrink-0">🚨</span>
-            <div>
-              <div className="font-bold text-sm" style={{ color: 'var(--lagos-red)' }}>Urgent — Action Required</div>
-              <div className="text-xs mt-1" style={{ color: '#991B1B' }}>
-                {student.name.split(' ')[0]} has {criticalHotspots.length} critical issue{criticalHotspots.length > 1 ? 's' : ''} that need immediate attention.
-                Please speak with the class teacher this week.
-              </div>
-            </div>
+        {/* Child switcher (shown only if multiple children) */}
+        {children.length > 1 && (
+          <div className="flex gap-2 mb-4 overflow-x-auto">
+            {children.map((kid, i) => (
+              <button
+                key={kid.id}
+                onClick={() => setActiveIdx(i)}
+                className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold shrink-0"
+                style={{
+                  background: activeIdx === i ? '#0033A0' : 'white',
+                  color: activeIdx === i ? 'white' : '#374151',
+                  border: '1.5px solid #E5E7EB',
+                }}
+              >
+                <span
+                  className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold"
+                  style={{ background: activeIdx === i ? 'rgba(255,255,255,0.2)' : '#EFF6FF', color: activeIdx === i ? 'white' : '#0033A0' }}
+                >
+                  {kid.name.charAt(0)}
+                </span>
+                {kid.name.split(' ')[0]}
+              </button>
+            ))}
           </div>
         )}
 
-        {/* Friday Report Card */}
-        <div className="card mb-6" style={{ border: '2px solid var(--lagos-blue)' }}>
-          {/* Card header */}
-          <div className="flex items-center justify-between mb-4 pb-4" style={{ borderBottom: '1px solid var(--border)' }}>
-            <div>
-              <div className="text-xs font-bold tracking-widest uppercase" style={{ color: 'var(--text-muted)' }}>Weekly Progress Report</div>
-              <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{reportDate}</div>
-            </div>
-            <div
-              className="px-3 py-1.5 rounded-full text-xs font-bold"
-              style={{ background: statusBg, color: statusColor }}
+        {/* View toggle */}
+        <div className="flex gap-1 mb-4 p-1 rounded-xl" style={{ background: '#E5E7EB' }}>
+          {(['report', 'messages'] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              className="flex-1 py-1.5 rounded-lg text-sm font-semibold relative"
+              style={{
+                background: view === v ? 'white' : 'transparent',
+                color: view === v ? '#0033A0' : '#6B7280',
+              }}
             >
-              {statusLabel}
-            </div>
-          </div>
+              {v === 'report' ? 'Weekly Report' : 'Messages'}
+              {v === 'messages' && unreadCount > 0 && (
+                <span
+                  className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-xs flex items-center justify-center text-white font-bold"
+                  style={{ background: '#E30613', fontSize: '10px' }}
+                >
+                  {unreadCount}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
 
-          {/* Student info */}
-          <div className="flex items-center gap-3 mb-5">
-            <div
-              className="w-12 h-12 rounded-full flex items-center justify-center font-black text-lg shrink-0"
-              style={{ background: 'var(--lagos-blue)', color: 'white' }}
-            >
-              {student.name.charAt(0)}
-            </div>
-            <div>
-              <div className="font-bold" style={{ color: 'var(--lagos-blue)' }}>{student.name}</div>
-              <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Class {student.class} · {schoolName.split(',')[0]}</div>
-            </div>
-          </div>
-
-          {/* Key metrics row */}
-          <div className="grid grid-cols-3 gap-3 mb-5">
-            <div className="text-center p-3 rounded-xl" style={{ background: 'var(--background)' }}>
-              <div className="text-2xl font-black mb-0.5" style={{ color: statusColor }}>{avgReadiness.toFixed(0)}%</div>
-              <div className="text-xs" style={{ color: 'var(--text-muted)' }}>WAEC Readiness</div>
-            </div>
-            <div className="text-center p-3 rounded-xl" style={{ background: 'var(--background)' }}>
-              <div
-                className="text-2xl font-black mb-0.5"
-                style={{ color: attendanceRate >= 80 ? 'var(--lagos-green)' : attendanceRate >= 60 ? 'var(--lagos-gold)' : 'var(--lagos-red)' }}
-              >
-                {attendanceRate}%
-              </div>
-              <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Attendance</div>
-            </div>
-            <div className="text-center p-3 rounded-xl" style={{ background: 'var(--background)' }}>
-              <div
-                className="text-2xl font-black mb-0.5"
-                style={{ color: hotspots.length === 0 ? 'var(--lagos-green)' : hotspots.length <= 2 ? 'var(--lagos-gold)' : 'var(--lagos-red)' }}
-              >
-                {hotspots.length}
-              </div>
-              <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Open Alerts</div>
-            </div>
-          </div>
-
-          {/* Subject breakdown */}
-          <div className="mb-5">
-            <div className="text-xs font-bold mb-3 uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Subject Readiness</div>
-            <div className="flex flex-col gap-2">
-              {WAEC_SUBJECTS.map((subject) => {
-                const metric = metrics.find((m) => m.subject === subject);
-                const score = metric?.readinessScore ?? 0;
-                const sc = metric?.colorStatus ?? ColorStatus.RED;
-                const barColor = sc === ColorStatus.GREEN ? 'var(--lagos-green)' : sc === ColorStatus.YELLOW ? 'var(--lagos-gold)' : 'var(--lagos-red)';
-                return (
-                  <div key={subject} className="flex items-center gap-3">
-                    <div className="text-xs font-medium w-24 shrink-0">{subject}</div>
-                    <div className="progress-bar flex-1">
-                      <div className="progress-bar-fill" style={{ width: `${score}%`, background: barColor }} />
+        {/* ── MESSAGES VIEW ───────────────────────────────────────────────────── */}
+        {view === 'messages' && (
+          <div className="rounded-2xl p-4" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
+            {messages.length === 0 ? (
+              <p className="text-sm text-center py-8" style={{ color: '#9CA3AF' }}>No messages yet.</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {messages.map((msg) => (
+                  <button
+                    key={msg.id}
+                    onClick={() => openThread(msg)}
+                    className="flex items-start gap-3 p-3 rounded-xl w-full text-left"
+                    style={{ background: msg.isRead ? '#F9FAFB' : '#EFF6FF', border: '1.5px solid #E5E7EB' }}
+                  >
+                    {!msg.isRead && (
+                      <div className="w-2 h-2 rounded-full mt-1.5 shrink-0" style={{ background: '#E30613' }} />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold truncate" style={{ color: '#111827' }}>{msg.subject}</p>
+                      <p className="text-xs truncate mt-0.5" style={{ color: '#6B7280' }}>{msg.fromName}</p>
+                      <p className="text-xs truncate mt-1" style={{ color: '#9CA3AF' }}>{msg.body.slice(0, 60)}…</p>
                     </div>
-                    <div className="text-xs font-bold w-8 text-right shrink-0" style={{ color: barColor }}>{score.toFixed(0)}%</div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Hotspot section */}
-          {hotspots.length > 0 && (
-            <div className="mb-4">
-              <div className="text-xs font-bold mb-2 uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Areas Needing Attention</div>
-              <div className="flex flex-col gap-1.5">
-                {hotspots.slice(0, 3).map((h) => (
-                  <div key={h.id} className="flex items-center gap-2 p-2 rounded-lg"
-                    style={{ background: h.severity === 'critical' ? '#FEE2E2' : '#FEF9C3' }}>
-                    <span className="text-base shrink-0">{h.severity === 'critical' ? '🔴' : '🟡'}</span>
-                    <span className="text-xs" style={{ color: h.severity === 'critical' ? '#991B1B' : '#854D0E' }}>{h.description}</span>
-                  </div>
+                    <span className="text-xs shrink-0" style={{ color: '#9CA3AF' }}>
+                      {new Date(msg.sentAt).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}
+                    </span>
+                  </button>
                 ))}
               </div>
-            </div>
-          )}
-
-          {/* Footer message */}
-          <div className="pt-4 text-xs" style={{ borderTop: '1px solid var(--border)', color: 'var(--text-muted)' }}>
-            {overallStatus === ColorStatus.GREEN
-              ? `${student.name.split(' ')[0]} is performing well. Keep encouraging daily study!`
-              : overallStatus === ColorStatus.YELLOW
-                ? `${student.name.split(' ')[0]} needs consistent study time this week. Ask about the highlighted subjects.`
-                : `Please speak with ${student.name.split(' ')[0]}'s teacher urgently. Extra support is needed now.`
-            }
-          </div>
-        </div>
-
-        {/* Tip for parents */}
-        <div className="rounded-xl p-4" style={{ background: 'var(--lagos-blue-light)' }}>
-          <div className="font-bold text-sm mb-1" style={{ color: 'var(--lagos-blue)' }}>What can you do this week?</div>
-          <div className="text-xs flex flex-col gap-1.5" style={{ color: 'var(--lagos-blue)' }}>
-            {hotspots.length === 0 ? (
-              <div>✓ Ask {student.name.split(' ')[0]} to explain one topic from class today — it reinforces learning.</div>
-            ) : (
-              <>
-                <div>① Ask {student.name.split(' ')[0]} to spend 20 minutes on the highlighted weak subject tonight.</div>
-                <div>② Confirm they attend every class this week — attendance directly impacts their WAEC score.</div>
-                {criticalHotspots.length > 0 && <div>③ Contact the school to arrange extra support this week.</div>}
-              </>
             )}
           </div>
-        </div>
+        )}
+
+        {/* ── REPORT VIEW ─────────────────────────────────────────────────────── */}
+        {view === 'report' && (
+          <>
+            {/* Critical alert */}
+            {criticalHs.length > 0 && (
+              <div className="rounded-xl p-4 mb-4 flex items-start gap-3" style={{ background: '#FEE2E2', border: '1.5px solid #FCA5A5' }}>
+                <span className="text-xl shrink-0">🚨</span>
+                <div>
+                  <p className="font-bold text-sm" style={{ color: '#E30613' }}>Urgent — Action Required</p>
+                  <p className="text-xs mt-1" style={{ color: '#991B1B' }}>
+                    {child.name.split(' ')[0]} has {criticalHs.length} critical issue{criticalHs.length > 1 ? 's' : ''}. Please contact the school this week.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Report card */}
+            <div className="rounded-2xl p-4 mb-4" style={{ background: 'white', border: '2px solid #0033A0' }}>
+              {/* Card header */}
+              <div className="flex items-center justify-between pb-3 mb-3" style={{ borderBottom: '1px solid #E5E7EB' }}>
+                <div>
+                  <p className="text-xs font-bold tracking-widest uppercase" style={{ color: '#9CA3AF' }}>Weekly Progress Report</p>
+                  <p className="text-xs mt-0.5" style={{ color: '#9CA3AF' }}>{reportDate}</p>
+                </div>
+                <span
+                  className="px-2 py-1 rounded-full text-xs font-bold"
+                  style={{ background: overallAvg >= 75 ? '#DCFCE7' : overallAvg >= 55 ? '#FEF9C3' : '#FEE2E2', color: statusColor }}
+                >
+                  {statusLabel}
+                </span>
+              </div>
+
+              {/* Student info */}
+              <div className="flex items-center gap-3 mb-4">
+                <div
+                  className="w-12 h-12 rounded-full flex items-center justify-center font-black text-lg shrink-0"
+                  style={{ background: '#0033A0', color: 'white' }}
+                >
+                  {child.name.charAt(0)}
+                </div>
+                <div>
+                  <p className="font-bold" style={{ color: '#0033A0' }}>{child.name}</p>
+                  <p className="text-xs" style={{ color: '#6B7280' }}>
+                    Class {cls?.level}{cls?.section} · {school?.name?.split(',')[0]}
+                  </p>
+                </div>
+              </div>
+
+              {/* Key metrics */}
+              <div className="grid grid-cols-3 gap-3 mb-4">
+                <MetricBox value={`${overallAvg}%`} label="WAEC Readiness" color={statusColor} />
+                <MetricBox
+                  value={`${attend}%`}
+                  label="Attendance"
+                  color={attend >= 80 ? '#008751' : attend >= 60 ? '#FFCC00' : '#E30613'}
+                />
+                <MetricBox
+                  value={String(hotspots.length)}
+                  label="Open Alerts"
+                  color={hotspots.length === 0 ? '#008751' : hotspots.length <= 2 ? '#FFCC00' : '#E30613'}
+                />
+              </div>
+
+              {/* Subject breakdown */}
+              <div className="mb-4">
+                <p className="text-xs font-bold mb-2 uppercase tracking-wide" style={{ color: '#9CA3AF' }}>Subject Readiness</p>
+                <div className="flex flex-col gap-2">
+                  {CORE_SUBJECTS.map((subject) => {
+                    const metric = subjectMetrics.find((m) => m.subject === subject);
+                    const score  = metric?.readinessScore ?? 0;
+                    const barCol = score >= 75 ? '#008751' : score >= 55 ? '#FFCC00' : score > 0 ? '#E30613' : '#D1D5DB';
+                    return (
+                      <div key={subject} className="flex items-center gap-3">
+                        <p className="text-xs font-medium shrink-0" style={{ width: 120, color: '#374151' }}>{subject}</p>
+                        <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: '#F3F4F6' }}>
+                          <div className="h-2 rounded-full" style={{ width: `${score}%`, background: barCol }} />
+                        </div>
+                        <p className="text-xs font-bold w-8 text-right shrink-0" style={{ color: barCol }}>
+                          {score > 0 ? `${Math.round(score)}%` : '—'}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Hotspot alerts */}
+              {hotspots.length > 0 && (
+                <div className="mb-4">
+                  <p className="text-xs font-bold mb-2 uppercase tracking-wide" style={{ color: '#9CA3AF' }}>Areas Needing Attention</p>
+                  <div className="flex flex-col gap-1.5">
+                    {hotspots.slice(0, 3).map((h) => (
+                      <div
+                        key={h.id}
+                        className="flex items-start gap-2 p-2 rounded-lg"
+                        style={{ background: h.severity === 'critical' ? '#FEE2E2' : '#FEF9C3' }}
+                      >
+                        <span className="shrink-0">{h.severity === 'critical' ? '🔴' : '🟡'}</span>
+                        <p className="text-xs" style={{ color: h.severity === 'critical' ? '#991B1B' : '#854D0E' }}>
+                          {h.subject} — readiness at {h.readinessScore}%
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Footer advice */}
+              <p className="text-xs pt-3" style={{ borderTop: '1px solid #E5E7EB', color: '#6B7280' }}>
+                {overallAvg >= 75
+                  ? `${child.name.split(' ')[0]} is performing well — keep encouraging daily study!`
+                  : overallAvg >= 55
+                    ? `${child.name.split(' ')[0]} needs consistent study time this week. Ask about the highlighted subjects.`
+                    : `Please speak with ${child.name.split(' ')[0]}'s teacher urgently — extra support is needed now.`}
+              </p>
+            </div>
+
+            {/* Action tips */}
+            <div className="rounded-xl p-4" style={{ background: '#EFF6FF', border: '1.5px solid #BFDBFE' }}>
+              <p className="font-bold text-sm mb-2" style={{ color: '#0033A0' }}>What you can do this week</p>
+              <div className="flex flex-col gap-1.5 text-xs" style={{ color: '#1E40AF' }}>
+                {hotspots.length === 0 ? (
+                  <p>✓ Ask {child.name.split(' ')[0]} to explain one topic from class — it reinforces learning.</p>
+                ) : (
+                  <>
+                    <p>① Ask {child.name.split(' ')[0]} to spend 20 min on the highlighted weak subject tonight.</p>
+                    <p>② Confirm they attend every class this week — attendance directly impacts WAEC readiness.</p>
+                    {criticalHs.length > 0 && <p>③ Contact the school to arrange extra support this week.</p>}
+                  </>
+                )}
+              </div>
+            </div>
+          </>
+        )}
       </main>
+    </div>
+  );
+}
+
+function MetricBox({ value, label, color }: { value: string; label: string; color: string }) {
+  return (
+    <div className="text-center p-3 rounded-xl" style={{ background: '#F9FAFB' }}>
+      <p className="text-2xl font-black leading-none" style={{ color }}>{value}</p>
+      <p className="text-xs mt-1" style={{ color: '#9CA3AF' }}>{label}</p>
     </div>
   );
 }

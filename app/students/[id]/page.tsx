@@ -3,42 +3,61 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
-import { WAEC_SUBJECTS, BEHAVIORAL_TRAIT_LABELS, BehavioralTrait } from '@/lib/types';
-import type { Student, ReadinessMetric, BrainMapProfile, Hotspot, DiaryEntry } from '@/lib/types';
-import { studentStore, metricsStore, brainMapStore, hotspotStore, diaryStore, topicStore, careerStore } from '@/lib/storage';
-import type { CareerRecommendation } from '@/lib/types';
+import {
+  BEHAVIORAL_TRAIT_LABELS, BehavioralTrait, ColorStatus,
+  CORE_SUBJECTS, ACADEMIC_DOMAINS,
+} from '@/lib/types';
+import type {
+  Student, ReadinessMetric, BrainMapProfile, Hotspot,
+  DiaryEntry, ReadinessSnapshot, CareerRecommendation, Class,
+} from '@/lib/types';
+import {
+  studentStore, metricsStore, brainMapStore, hotspotStore,
+  diaryStore, classStore, snapshotStore, careerStore,
+  messageStore, interventionStore,
+} from '@/lib/storage';
 import { recomputeStudent } from '@/lib/calculations';
 import Navbar from '@/components/Navbar';
-import ReadinessBadge from '@/components/ReadinessBadge';
-import { ColorStatus } from '@/lib/types';
 
-const SEVERITY_STYLE: Record<string, { bg: string; text: string }> = {
-  critical: { bg: '#FEE2E2', text: '#991B1B' },
-  high: { bg: '#FEF9C3', text: '#854D0E' },
-  medium: { bg: 'var(--lagos-blue-light)', text: 'var(--lagos-blue)' },
-};
+function uid(): string {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
 
-const CATEGORY_ICON: Record<string, string> = {
-  low_attendance: '📅',
-  low_readiness: '📉',
-  low_engagement: '😔',
-  math_weakness: '🔢',
-  english_weakness: '📝',
+const DOMAIN_FIELDS = [
+  { key: 'logicalAnalytical',  label: 'Logical-Analytical' },
+  { key: 'spatialMechanical',  label: 'Spatial-Mechanical' },
+  { key: 'verbalCreative',     label: 'Verbal-Creative'    },
+  { key: 'appliedPractical',   label: 'Applied-Practical'  },
+  { key: 'consistency',        label: 'Consistency'        },
+] as const;
+
+const SEVERITY_STYLES = {
+  critical: { bg: '#FEE2E2', color: '#E30613', border: '#FECACA' },
+  high:     { bg: '#FFF7ED', color: '#EA580C', border: '#FDBA74' },
+  medium:   { bg: '#FEF9C3', color: '#854D0E', border: '#FDE047' },
 };
+const TREND_ICON: Record<string, string>  = { up: '↑', down: '↓', stable: '→' };
+const TREND_COLOR: Record<string, string> = { up: '#008751', down: '#E30613', stable: '#6B7280' };
+
+type Tab = 'overview' | 'brainmap' | 'trends' | 'career';
 
 export default function StudentProfilePage() {
   const { user, isLoading } = useAuth();
-  const router = useRouter();
-  const params = useParams();
+  const router  = useRouter();
+  const params  = useParams();
   const studentId = params.id as string;
 
-  const [student, setStudent] = useState<Student | null>(null);
-  const [metrics, setMetrics] = useState<ReadinessMetric[]>([]);
-  const [brainMap, setBrainMap] = useState<BrainMapProfile | null>(null);
-  const [hotspots, setHotspots] = useState<Hotspot[]>([]);
-  const [diaries, setDiaries] = useState<DiaryEntry[]>([]);
-  const [activeTab, setActiveTab] = useState<'overview' | 'brainmap' | 'history' | 'career'>('overview');
-  const [career, setCareer] = useState<CareerRecommendation | null>(null);
+  const [student,   setStudent]   = useState<Student | null>(null);
+  const [cls,       setCls]       = useState<Class | null>(null);
+  const [metrics,   setMetrics]   = useState<ReadinessMetric[]>([]);
+  const [brainMap,  setBrainMap]  = useState<BrainMapProfile | null>(null);
+  const [hotspots,  setHotspots]  = useState<Hotspot[]>([]);
+  const [diaries,   setDiaries]   = useState<DiaryEntry[]>([]);
+  const [snapshots, setSnapshots] = useState<ReadinessSnapshot[]>([]);
+  const [career,    setCareer]    = useState<CareerRecommendation | null>(null);
+  const [activeTab, setActiveTab] = useState<Tab>('overview');
+  const [showIntervention, setShowIntervention] = useState(false);
+  const [intDesc, setIntDesc]     = useState('');
 
   useEffect(() => {
     if (isLoading) return;
@@ -48,372 +67,446 @@ export default function StudentProfilePage() {
     if (!s) { router.replace('/dashboard'); return; }
     setStudent(s);
 
+    const c = classStore.getById(s.classId);
+    setCls(c ?? null);
+
     recomputeStudent(studentId);
 
     setMetrics(metricsStore.getByStudent(studentId));
     setBrainMap(brainMapStore.getByStudent(studentId) ?? null);
     setHotspots(hotspotStore.getByStudent(studentId));
-    setDiaries(diaryStore.getByStudent(studentId));
+    setDiaries(s.classId ? diaryStore.getByClass(s.classId).slice(0, 20) : []);
+    setSnapshots(snapshotStore.getByStudent(studentId));
     setCareer(careerStore.getByStudent(studentId) ?? null);
   }, [user, isLoading, studentId, router]);
 
   if (!student) {
     return (
-      <div className="min-h-screen" style={{ background: 'var(--lagos-blue)' }}>
-        <div className="text-white text-center pt-20 text-lg font-bold animate-pulse">Loading...</div>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#0033A0' }}>
+        <p className="text-white font-bold animate-pulse">Loading...</p>
       </div>
     );
   }
 
   const avgReadiness = metrics.length > 0
-    ? metrics.reduce((a, m) => a + m.readinessScore, 0) / metrics.length
+    ? Math.round(metrics.reduce((a, m) => a + m.readinessScore, 0) / metrics.length)
     : 0;
+  const overallColor = avgReadiness >= 75 ? '#008751' : avgReadiness >= 55 ? '#FFCC00' : '#E30613';
 
-  const overallStatus = avgReadiness >= 75 ? ColorStatus.GREEN : avgReadiness >= 55 ? ColorStatus.YELLOW : ColorStatus.RED;
-  const topics = topicStore.getAll();
+  function handleLogIntervention() {
+    if (!intDesc.trim() || !user) return;
+    interventionStore.save({
+      id: uid(),
+      studentId: student!.id,
+      schoolId: student!.schoolId,
+      assignedBy: user.id,
+      assignedTo: user.id,
+      description: intDesc.trim(),
+      dueDate: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
+      status: 'open',
+      createdAt: new Date().toISOString(),
+    });
+    setIntDesc('');
+    setShowIntervention(false);
+    alert('Intervention logged!');
+  }
+
+  const TAB_LABELS: Record<Tab, string> = {
+    overview: 'WAEC',
+    brainmap: 'Brain Map',
+    trends:   'Trends',
+    career:   'Career',
+  };
 
   return (
-    <div className="min-h-screen" style={{ background: 'var(--background)' }}>
+    <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
       <Navbar />
 
-      <main className="max-w-5xl mx-auto px-4 py-8">
+      <main className="max-w-2xl mx-auto px-4 py-5 pb-10">
         {/* Back */}
-        <button onClick={() => router.back()} className="text-xs mb-4 font-medium" style={{ color: 'var(--text-muted)' }}>
+        <button onClick={() => router.back()} className="text-sm font-medium mb-4" style={{ color: '#0033A0' }}>
           ← Back
         </button>
 
-        {/* Student header */}
-        <div className="card mb-6 flex flex-col sm:flex-row items-start sm:items-center gap-5">
+        {/* Student header card */}
+        <div className="rounded-2xl p-5 mb-4 flex items-start gap-4" style={{ background: '#0033A0', color: 'white' }}>
           <div
-            className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-black shrink-0"
-            style={{ background: 'var(--lagos-blue)', color: 'white' }}
+            className="w-14 h-14 rounded-2xl flex items-center justify-center text-xl font-black shrink-0"
+            style={{ background: 'rgba(255,255,255,0.2)' }}
           >
-            {student.name.charAt(0)}
+            {student.name.split(' ').map((n) => n[0]).slice(0, 2).join('')}
           </div>
-          <div className="flex-1">
-            <h1 className="text-2xl font-black" style={{ color: 'var(--lagos-blue)' }}>{student.name}</h1>
-            <div className="flex flex-wrap gap-2 mt-1">
-              <span className="text-xs px-2 py-1 rounded-full font-medium"
-                style={{ background: 'var(--lagos-blue-light)', color: 'var(--lagos-blue)' }}>
-                Class {student.class}
+          <div className="flex-1 min-w-0">
+            <h1 className="text-lg font-black leading-tight">{student.name}</h1>
+            <p className="text-xs opacity-70 mt-0.5">
+              {cls?.level}{cls?.section} · {student.gender === 'M' ? 'Male' : 'Female'}
+              {student.parentPhone && <> · Parent: {student.parentPhone}</>}
+            </p>
+            <div className="flex items-center gap-2 mt-2">
+              <span
+                className="text-sm font-black px-2 py-0.5 rounded-full"
+                style={{ background: overallColor, color: 'white' }}
+              >
+                {avgReadiness}%
               </span>
-              <span className="text-xs px-2 py-1 rounded-full font-medium"
-                style={{ background: 'var(--lagos-green-light)', color: 'var(--lagos-green)' }}>
-                {diaries.length} diary entries
-              </span>
+              <span className="text-xs opacity-60">avg readiness</span>
               {hotspots.length > 0 && (
-                <span className="text-xs px-2 py-1 rounded-full font-medium"
-                  style={{ background: '#FEE2E2', color: 'var(--lagos-red)' }}>
-                  {hotspots.length} active alerts
+                <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: '#FEE2E2', color: '#E30613' }}>
+                  {hotspots.length} hotspot{hotspots.length > 1 ? 's' : ''}
                 </span>
               )}
             </div>
           </div>
-          <ReadinessBadge score={avgReadiness} status={overallStatus} size="lg" />
         </div>
 
-        {/* Hotspot alerts */}
-        {hotspots.length > 0 && (
-          <div className="flex flex-col gap-2 mb-6">
-            {hotspots.map((h) => (
-              <div key={h.id} className="flex items-center gap-3 p-3 rounded-xl"
-                style={{ background: SEVERITY_STYLE[h.severity].bg, border: '1px solid rgba(0,0,0,0.06)' }}>
-                <span className="text-lg">{CATEGORY_ICON[h.category]}</span>
-                <div className="flex-1">
-                  <span className="text-xs font-bold uppercase tracking-wide" style={{ color: SEVERITY_STYLE[h.severity].text }}>
-                    {h.severity}
-                  </span>
-                  <span className="text-sm ml-2" style={{ color: SEVERITY_STYLE[h.severity].text }}>{h.description}</span>
-                </div>
+        {/* Action buttons */}
+        <div className="flex gap-2 mb-4">
+          {student.parentPhone && (
+            <a
+              href={`tel:${student.parentPhone}`}
+              className="flex-1 py-2.5 rounded-xl text-xs font-bold text-center"
+              style={{ background: '#EFF6FF', color: '#0033A0', border: '1.5px solid #BFDBFE' }}
+            >
+              📞 Call Parent
+            </a>
+          )}
+          <button
+            onClick={() => setShowIntervention(true)}
+            className="flex-1 py-2.5 rounded-xl text-xs font-bold"
+            style={{ background: '#FFF7ED', color: '#EA580C', border: '1.5px solid #FDBA74' }}
+          >
+            📝 Log Intervention
+          </button>
+          <button
+            onClick={() => router.push(`/hotspots`)}
+            className="flex-1 py-2.5 rounded-xl text-xs font-bold"
+            style={{ background: hotspots.length > 0 ? '#FEE2E2' : '#F0FDF4', color: hotspots.length > 0 ? '#E30613' : '#008751', border: `1.5px solid ${hotspots.length > 0 ? '#FECACA' : '#86EFAC'}` }}
+          >
+            🔥 {hotspots.length} Hotspot{hotspots.length !== 1 ? 's' : ''}
+          </button>
+        </div>
+
+        {/* Intervention modal */}
+        {showIntervention && (
+          <div
+            className="fixed inset-0 z-50 flex items-end"
+            style={{ background: 'rgba(0,0,0,0.4)' }}
+            onClick={() => setShowIntervention(false)}
+          >
+            <div
+              className="w-full rounded-t-3xl p-6 pb-8"
+              style={{ background: 'white' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="font-black text-base mb-1" style={{ color: '#111827' }}>Log Intervention</h3>
+              <p className="text-xs mb-4" style={{ color: '#6B7280' }}>For {student.name} — {cls?.level}{cls?.section}</p>
+              <textarea
+                className="w-full rounded-xl p-3 text-sm resize-none mb-4"
+                style={{ border: '1.5px solid #D1D5DB', background: '#F9FAFB', minHeight: 100 }}
+                placeholder="Describe the intervention (e.g. extra practice on quadratic equations, individual tutoring session...)"
+                value={intDesc}
+                onChange={(e) => setIntDesc(e.target.value)}
+              />
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowIntervention(false)}
+                  className="flex-1 py-3 rounded-xl text-sm font-semibold"
+                  style={{ background: '#F3F4F6', color: '#374151' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleLogIntervention}
+                  disabled={!intDesc.trim()}
+                  className="flex-1 py-3 rounded-xl text-sm font-bold text-white"
+                  style={{ background: intDesc.trim() ? '#0033A0' : '#9CA3AF' }}
+                >
+                  Log Intervention
+                </button>
               </div>
-            ))}
+            </div>
+          </div>
+        )}
+
+        {/* Active hotspot alerts */}
+        {hotspots.length > 0 && (
+          <div className="flex flex-col gap-2 mb-4">
+            {hotspots.map((h) => {
+              const sev = SEVERITY_STYLES[h.severity];
+              return (
+                <div
+                  key={h.id}
+                  className="flex items-center gap-3 p-3 rounded-xl"
+                  style={{ background: sev.bg, border: `1.5px solid ${sev.border}` }}
+                >
+                  <span className="font-black text-sm" style={{ color: sev.color }}>
+                    {h.severity === 'critical' ? '🔴' : h.severity === 'high' ? '🟠' : '🟡'}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold" style={{ color: sev.color }}>
+                      {h.subject} — {(h.readinessScore ?? 0).toFixed(0)}%{' '}
+                      <span style={{ color: TREND_COLOR[h.trend] }}>{TREND_ICON[h.trend]}</span>
+                    </p>
+                    <p className="text-xs" style={{ color: sev.color, opacity: 0.8 }}>{h.description}</p>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 
         {/* Tabs */}
-        <div className="flex gap-1 mb-6 p-1 rounded-xl" style={{ background: 'var(--border)' }}>
-          {(['overview', 'brainmap', 'history', 'career'] as const).map((tab) => (
+        <div
+          className="flex gap-1 p-1 rounded-xl mb-4"
+          style={{ background: '#E5E7EB' }}
+        >
+          {(Object.keys(TAB_LABELS) as Tab[]).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className="flex-1 py-2 rounded-lg text-sm font-semibold capitalize transition-all"
+              className="flex-1 py-2 rounded-lg text-xs font-bold transition-all"
               style={{
                 background: activeTab === tab ? 'white' : 'transparent',
-                color: activeTab === tab ? 'var(--lagos-blue)' : 'var(--text-muted)',
-                boxShadow: activeTab === tab ? '0 1px 4px rgba(0,0,0,0.1)' : 'none',
+                color: activeTab === tab ? '#0033A0' : '#6B7280',
+                boxShadow: activeTab === tab ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
               }}
             >
-              {tab === 'overview' ? 'WAEC Readiness' : tab === 'brainmap' ? 'Brain Map' : tab === 'history' ? 'Diary History' : 'Career Path'}
+              {TAB_LABELS[tab]}
             </button>
           ))}
         </div>
 
-        {/* WAEC Readiness Tab */}
+        {/* ── WAEC Readiness Tab ──────────────────────────────────────── */}
         {activeTab === 'overview' && (
-          <div>
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-              {WAEC_SUBJECTS.map((subject) => {
-                const metric = metrics.find((m) => m.subject === subject);
-                return (
-                  <ReadinessBadge
-                    key={subject}
-                    score={metric?.readinessScore ?? 0}
-                    status={metric?.colorStatus ?? ColorStatus.RED}
-                    subject={subject}
-                    size="md"
-                  />
-                );
-              })}
-            </div>
-            <div className="card">
-              <h3 className="font-bold text-sm mb-3" style={{ color: 'var(--lagos-blue)' }}>Score Breakdown</h3>
-              <div className="flex flex-col gap-3">
-                {WAEC_SUBJECTS.map((subject) => {
-                  const metric = metrics.find((m) => m.subject === subject);
-                  const score = metric?.readinessScore ?? 0;
-                  const status = metric?.colorStatus ?? ColorStatus.RED;
-                  const barColor = status === ColorStatus.GREEN ? 'var(--lagos-green)' : status === ColorStatus.YELLOW ? 'var(--lagos-gold)' : 'var(--lagos-red)';
-                  return (
-                    <div key={subject}>
-                      <div className="flex justify-between text-xs mb-1">
-                        <span className="font-medium">{subject}</span>
-                        <span className="font-bold" style={{ color: barColor }}>{score.toFixed(0)}%</span>
-                      </div>
-                      <div className="progress-bar">
-                        <div className="progress-bar-fill" style={{ width: `${score}%`, background: barColor }} />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Brain Map Tab */}
-        {activeTab === 'brainmap' && brainMap && (
-          <div className="grid sm:grid-cols-2 gap-5">
-            {/* Academic domains */}
-            <div className="card">
-              <h3 className="font-bold text-sm mb-4" style={{ color: 'var(--lagos-blue)' }}>Academic Domains</h3>
-              <div className="flex flex-col gap-3">
-                {Object.entries(brainMap.academicDomains).map(([domain, score]) => (
-                  <div key={domain}>
-                    <div className="flex justify-between text-xs mb-1">
-                      <span className="font-medium">{domain}</span>
-                      <span className="font-bold" style={{ color: 'var(--lagos-blue)' }}>{(score * 100).toFixed(0)}%</span>
-                    </div>
-                    <div className="progress-bar">
-                      <div className="progress-bar-fill" style={{ width: `${score * 100}%`, background: 'var(--lagos-blue)' }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
-                <div className="text-xs font-semibold mb-2" style={{ color: 'var(--text-muted)' }}>Top Strengths</div>
-                <div className="flex flex-wrap gap-1.5">
-                  {brainMap.topStrengths.map((s) => (
-                    <span key={s} className="text-xs px-2.5 py-1 rounded-full font-medium"
-                      style={{ background: 'var(--lagos-gold-light)', color: 'var(--lagos-gold)' }}>
-                      ⭐ {s}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Behavioral traits */}
-            <div className="card">
-              <h3 className="font-bold text-sm mb-4" style={{ color: 'var(--lagos-blue)' }}>Behavioral Traits</h3>
-              <div className="flex flex-col gap-3">
-                {Object.values(BehavioralTrait).map((trait) => {
-                  const score = brainMap.behavioralTraits[trait] ?? 0;
-                  return (
-                    <div key={trait}>
-                      <div className="flex justify-between text-xs mb-1">
-                        <span className="font-medium">{BEHAVIORAL_TRAIT_LABELS[trait]}</span>
-                        <span className="font-bold" style={{
-                          color: score >= 0.7 ? 'var(--lagos-green)' : score >= 0.45 ? 'var(--lagos-gold)' : 'var(--lagos-red)',
-                        }}>
-                          {(score * 100).toFixed(0)}%
-                        </span>
-                      </div>
-                      <div className="progress-bar">
-                        <div className="progress-bar-fill" style={{
-                          width: `${score * 100}%`,
-                          background: score >= 0.7 ? 'var(--lagos-green)' : score >= 0.45 ? 'var(--lagos-gold)' : 'var(--lagos-red)',
-                        }} />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="mt-4 grid grid-cols-2 gap-3" style={{ borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
-                <div className="text-center p-3 rounded-xl" style={{ background: 'var(--lagos-blue-light)' }}>
-                  <div className="text-xl font-black" style={{ color: 'var(--lagos-blue)' }}>{brainMap.academicScore.toFixed(0)}</div>
-                  <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Academic Score</div>
-                </div>
-                <div className="text-center p-3 rounded-xl" style={{ background: 'var(--lagos-green-light)' }}>
-                  <div className="text-xl font-black" style={{ color: 'var(--lagos-green)' }}>{brainMap.behavioralScore.toFixed(0)}</div>
-                  <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Behavioral Score</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Career Path Tab */}
-        {activeTab === 'career' && (
-          <div>
-            {career ? (
-              <div className="flex flex-col gap-5">
-                {/* Pathway banner */}
+          <div className="flex flex-col gap-3">
+            {CORE_SUBJECTS.map((subject) => {
+              const metric = metrics.find((m) => m.subject === subject);
+              const score = metric?.readinessScore ?? 0;
+              const color = score >= 75 ? '#008751' : score >= 55 ? '#FFCC00' : '#E30613';
+              return (
                 <div
-                  className="rounded-2xl p-6 flex flex-col sm:flex-row items-start sm:items-center gap-5"
-                  style={{
-                    background: career.pathway === 'Science' ? 'var(--lagos-blue)' : career.pathway === 'Arts' ? 'var(--lagos-green)' : 'var(--lagos-gold)',
-                    color: 'white',
-                  }}
+                  key={subject}
+                  className="rounded-2xl p-4"
+                  style={{ background: 'white', border: '1.5px solid #E5E7EB' }}
                 >
-                  <div className="text-5xl shrink-0">
-                    {career.pathway === 'Science' ? '🔬' : career.pathway === 'Arts' ? '🎨' : '💼'}
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="font-semibold text-sm" style={{ color: '#111827' }}>{subject}</p>
+                    <p className="font-black text-lg" style={{ color }}>{score.toFixed(0)}%</p>
                   </div>
-                  <div className="flex-1">
-                    <div className="text-sm font-medium opacity-80 mb-1">Recommended Pathway</div>
-                    <div className="text-3xl font-black mb-1">{career.pathway}</div>
-                    <div className="text-sm opacity-80">
-                      {career.pathway === 'Science' ? 'Engineering, Medicine, Technology, Sciences' : career.pathway === 'Arts' ? 'Law, Journalism, Education, Languages' : 'Accounting, Business, Economics, Administration'}
-                    </div>
+                  <div className="h-2.5 rounded-full overflow-hidden" style={{ background: '#F3F4F6' }}>
+                    <div
+                      className="h-2.5 rounded-full transition-all"
+                      style={{ width: `${score}%`, background: color }}
+                    />
                   </div>
-                  <div
-                    className="px-4 py-2 rounded-xl text-center shrink-0"
-                    style={{ background: 'rgba(255,255,255,0.2)' }}
-                  >
-                    <div className="text-3xl font-black">{career.confidence}%</div>
-                    <div className="text-xs opacity-80">confidence</div>
-                  </div>
+                  <p className="text-xs mt-1" style={{ color: '#9CA3AF' }}>
+                    {score >= 75 ? 'On track for WAEC' : score >= 55 ? 'Needs improvement' : 'At risk — below threshold'}
+                  </p>
                 </div>
+              );
+            })}
+          </div>
+        )}
 
-                {/* Reasoning */}
-                <div className="card">
-                  <h3 className="font-bold text-sm mb-3" style={{ color: 'var(--lagos-blue)' }}>Why this pathway?</h3>
-                  <div className="flex flex-col gap-2">
-                    {career.reasons.map((reason, i) => (
-                      <div key={i} className="flex items-start gap-2 text-sm">
-                        <span className="shrink-0 mt-0.5" style={{ color: 'var(--lagos-green)' }}>✓</span>
-                        <span>{reason}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Pathway comparison */}
-                <div className="card">
-                  <h3 className="font-bold text-sm mb-4" style={{ color: 'var(--lagos-blue)' }}>Pathway Comparison</h3>
-                  {(['Science', 'Arts', 'Commercial'] as const).map((pathway) => {
-                    const isTop = pathway === career.pathway;
-                    const relevantSubjects: Record<string, string[]> = {
-                      Science: ['Mathematics', 'Physics', 'Chemistry'],
-                      Arts: ['English', 'Mathematics'],
-                      Commercial: ['Mathematics', 'English'],
-                    };
-                    const avgScore = relevantSubjects[pathway].reduce((sum, subj) => sum + (career.subjectScores[subj] ?? 0), 0) / relevantSubjects[pathway].length;
-                    return (
-                      <div key={pathway} className="flex items-center gap-3 mb-3">
-                        <div className="text-sm font-semibold w-24 shrink-0" style={{ color: isTop ? 'var(--lagos-blue)' : 'var(--text-muted)' }}>
-                          {isTop && '★ '}{pathway}
-                        </div>
-                        <div className="progress-bar flex-1">
-                          <div
-                            className="progress-bar-fill"
-                            style={{
-                              width: `${avgScore}%`,
-                              background: isTop ? 'var(--lagos-blue)' : 'var(--border)',
-                            }}
-                          />
-                        </div>
-                        <div className="text-xs font-bold w-8 text-right shrink-0" style={{ color: isTop ? 'var(--lagos-blue)' : 'var(--text-muted)' }}>
-                          {avgScore.toFixed(0)}%
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Subject scores */}
-                <div className="card">
-                  <h3 className="font-bold text-sm mb-3" style={{ color: 'var(--lagos-blue)' }}>Subject Score Breakdown</h3>
-                  <div className="flex flex-col gap-2">
-                    {Object.entries(career.subjectScores).map(([subject, score]) => {
-                      const sc = score >= 75 ? 'green' : score >= 55 ? 'yellow' : 'red';
-                      const barColor = sc === 'green' ? 'var(--lagos-green)' : sc === 'yellow' ? 'var(--lagos-gold)' : 'var(--lagos-red)';
+        {/* ── Brain Map Tab ────────────────────────────────────────────── */}
+        {activeTab === 'brainmap' && (
+          <div>
+            {brainMap ? (
+              <div className="flex flex-col gap-4">
+                {/* Domain bars */}
+                <div className="rounded-2xl p-5" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
+                  <h3 className="font-bold text-sm mb-4" style={{ color: '#0033A0' }}>
+                    Academic + Behavioural Domains
+                    {brainMap.weeksOfData < 3 && (
+                      <span className="ml-2 text-xs font-normal" style={{ color: '#9CA3AF' }}>
+                        ({brainMap.weeksOfData} weeks — limited data)
+                      </span>
+                    )}
+                  </h3>
+                  <div className="flex flex-col gap-4">
+                    {DOMAIN_FIELDS.map(({ key, label }) => {
+                      const score = brainMap[key] as number;
+                      const color = score >= 65 ? '#008751' : score >= 45 ? '#FFCC00' : '#E30613';
                       return (
-                        <div key={subject}>
+                        <div key={key}>
                           <div className="flex justify-between text-xs mb-1">
-                            <span className="font-medium">{subject}</span>
-                            <span className="font-bold" style={{ color: barColor }}>{score.toFixed(0)}%</span>
+                            <span className="font-semibold" style={{ color: '#374151' }}>{label}</span>
+                            <span className="font-black" style={{ color }}>{score}%</span>
                           </div>
-                          <div className="progress-bar">
-                            <div className="progress-bar-fill" style={{ width: `${score}%`, background: barColor }} />
+                          <div className="h-2.5 rounded-full overflow-hidden" style={{ background: '#F3F4F6' }}>
+                            <div className="h-2.5 rounded-full" style={{ width: `${score}%`, background: color }} />
                           </div>
                         </div>
                       );
                     })}
                   </div>
-                  <div className="mt-4 text-xs" style={{ color: 'var(--text-muted)' }}>
-                    Computed: {new Date(career.computedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  {/* Top profiles */}
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {brainMap.topProfiles.map((p) => (
+                      <span
+                        key={p}
+                        className="text-xs px-2.5 py-1 rounded-full font-bold"
+                        style={{ background: '#EFF6FF', color: '#0033A0' }}
+                      >
+                        ⭐ {p}
+                      </span>
+                    ))}
                   </div>
+                </div>
+
+                {/* Teaching recommendation */}
+                <div className="rounded-2xl p-5" style={{ background: '#EFF6FF', border: '1.5px solid #BFDBFE' }}>
+                  <p className="text-xs font-bold mb-2" style={{ color: '#0033A0' }}>Teacher Recommendation</p>
+                  <p className="text-sm leading-relaxed" style={{ color: '#1E40AF' }}>
+                    {brainMap.teachingRecommendation}
+                  </p>
+                </div>
+
+                {/* Home action */}
+                <div className="rounded-2xl p-5" style={{ background: '#F0FDF4', border: '1.5px solid #86EFAC' }}>
+                  <p className="text-xs font-bold mb-2" style={{ color: '#008751' }}>Home Action for Parent</p>
+                  <p className="text-sm leading-relaxed" style={{ color: '#166534' }}>
+                    {brainMap.homeAction}
+                  </p>
                 </div>
               </div>
             ) : (
-              <div className="card text-center py-10" style={{ color: 'var(--text-muted)' }}>
-                <div className="text-3xl mb-2">🎓</div>
-                <div className="text-sm font-medium">No career data yet</div>
-                <div className="text-xs mt-1">Submit more diary entries to build the career recommendation.</div>
+              <div className="text-center py-16 rounded-2xl" style={{ background: 'white' }}>
+                <p className="text-3xl mb-3">🧠</p>
+                <p className="font-semibold" style={{ color: '#374151' }}>Brain Map not yet available</p>
+                <p className="text-sm mt-1" style={{ color: '#9CA3AF' }}>Requires at least 3 weeks of class diary data</p>
               </div>
             )}
           </div>
         )}
 
-        {/* Diary History Tab */}
-        {activeTab === 'history' && (
-          <div className="card">
-            <h3 className="font-bold text-sm mb-4" style={{ color: 'var(--lagos-blue)' }}>Diary History ({diaries.length} entries)</h3>
-            {diaries.length === 0 ? (
-              <div className="text-center py-8" style={{ color: 'var(--text-muted)' }}>
-                <div className="text-3xl mb-2">📓</div>
-                <div className="text-sm">No diary entries yet</div>
+        {/* ── Trends Tab ───────────────────────────────────────────────── */}
+        {activeTab === 'trends' && (
+          <div className="flex flex-col gap-4">
+            {CORE_SUBJECTS.map((subject) => {
+              const subSnaps = snapshots
+                .filter((s) => s.subject === subject)
+                .sort((a, b) => a.snapshotDate.localeCompare(b.snapshotDate));
+              if (subSnaps.length === 0) return null;
+              const latest = subSnaps[subSnaps.length - 1].readinessScore;
+              const max = Math.max(...subSnaps.map((s) => s.readinessScore));
+              const trendColor = latest >= 75 ? '#008751' : latest >= 55 ? '#FFCC00' : '#E30613';
+              const trendDir = subSnaps.length >= 2
+                ? subSnaps[subSnaps.length - 1].readinessScore > subSnaps[subSnaps.length - 2].readinessScore + 3
+                  ? '↑' : subSnaps[subSnaps.length - 1].readinessScore < subSnaps[subSnaps.length - 2].readinessScore - 3
+                    ? '↓' : '→'
+                : '→';
+
+              return (
+                <div
+                  key={subject}
+                  className="rounded-2xl p-4"
+                  style={{ background: 'white', border: '1.5px solid #E5E7EB' }}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="font-bold text-sm" style={{ color: '#111827' }}>{subject}</p>
+                    <div className="flex items-center gap-2">
+                      <span className="font-black" style={{ color: trendColor }}>{latest.toFixed(0)}%</span>
+                      <span className="font-black" style={{ color: trendDir === '↑' ? '#008751' : trendDir === '↓' ? '#E30613' : '#6B7280' }}>
+                        {trendDir}
+                      </span>
+                    </div>
+                  </div>
+                  {/* Sparkline bars */}
+                  <div className="flex items-end gap-1" style={{ height: 48 }}>
+                    {subSnaps.slice(-12).map((snap, i) => {
+                      const h = max > 0 ? (snap.readinessScore / max) * 48 : 4;
+                      const c = snap.readinessScore >= 75 ? '#008751' : snap.readinessScore >= 55 ? '#FFCC00' : '#E30613';
+                      return (
+                        <div
+                          key={i}
+                          className="flex-1 rounded-t-sm"
+                          style={{ height: h, background: c, minHeight: 4 }}
+                          title={`${snap.snapshotDate}: ${(snap.readinessScore ?? 0).toFixed(0)}%`}
+                        />
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs mt-2" style={{ color: '#9CA3AF' }}>
+                    {subSnaps.length} data point{subSnaps.length !== 1 ? 's' : ''}
+                  </p>
+                </div>
+              );
+            })}
+            {snapshots.length === 0 && (
+              <div className="text-center py-16 rounded-2xl" style={{ background: 'white' }}>
+                <p className="text-3xl mb-3">📈</p>
+                <p className="font-semibold" style={{ color: '#374151' }}>No trend data yet</p>
+                <p className="text-sm mt-1" style={{ color: '#9CA3AF' }}>Submit diary entries to build trend charts</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Career Tab ───────────────────────────────────────────────── */}
+        {activeTab === 'career' && (
+          <div>
+            {career ? (
+              <div className="flex flex-col gap-4">
+                {/* Pathway banner */}
+                <div
+                  className="rounded-2xl p-5 flex items-center gap-4"
+                  style={{
+                    background: career.pathway === 'Science' ? '#0033A0' : career.pathway === 'Arts' ? '#008751' : '#7C3AED',
+                    color: 'white',
+                  }}
+                >
+                  <span className="text-4xl">
+                    {career.pathway === 'Science' ? '🔬' : career.pathway === 'Arts' ? '🎨' : '💼'}
+                  </span>
+                  <div className="flex-1">
+                    <p className="text-xs font-medium opacity-70">Recommended Pathway</p>
+                    <p className="text-2xl font-black">{career.pathway}</p>
+                    <p className="text-xs opacity-70 mt-0.5">
+                      {career.pathway === 'Science' ? 'Engineering, Medicine, Technology' : career.pathway === 'Arts' ? 'Law, Journalism, Education' : 'Accounting, Business, Economics'}
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-2xl font-black">{career.confidence}%</p>
+                    <p className="text-xs opacity-70">confidence</p>
+                  </div>
+                </div>
+
+                {/* Evidence */}
+                <div className="rounded-2xl p-4" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
+                  <h3 className="font-bold text-sm mb-3" style={{ color: '#0033A0' }}>Evidence</h3>
+                  {career.reasons.map((r, i) => (
+                    <div key={i} className="flex items-start gap-2 mb-2">
+                      <span style={{ color: '#008751' }}>✓</span>
+                      <p className="text-sm" style={{ color: '#374151' }}>{r}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Subject scores */}
+                <div className="rounded-2xl p-4" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
+                  <h3 className="font-bold text-sm mb-3" style={{ color: '#0033A0' }}>Subject Scores</h3>
+                  {Object.entries(career.subjectScores).map(([subj, score]) => {
+                    const c = score >= 75 ? '#008751' : score >= 55 ? '#FFCC00' : '#E30613';
+                    return (
+                      <div key={subj} className="mb-3">
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="font-medium">{subj}</span>
+                          <span className="font-bold" style={{ color: c }}>{score.toFixed(0)}%</span>
+                        </div>
+                        <div className="h-2 rounded-full overflow-hidden" style={{ background: '#F3F4F6' }}>
+                          <div className="h-2 rounded-full" style={{ width: `${score}%`, background: c }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             ) : (
-              <div className="flex flex-col gap-3">
-                {diaries.slice(0, 20).map((diary) => {
-                  const topic = topics.find((t) => t.id === diary.topicId);
-                  return (
-                    <div key={diary.id} className="flex items-center gap-4 p-3 rounded-xl"
-                      style={{ background: 'var(--background)' }}>
-                      <div
-                        className="w-12 h-12 rounded-xl flex items-center justify-center font-black text-sm shrink-0"
-                        style={{
-                          background: diary.classScore >= 75 ? 'var(--lagos-green-light)' : diary.classScore >= 55 ? '#FEF9C3' : '#FEE2E2',
-                          color: diary.classScore >= 75 ? 'var(--lagos-green)' : diary.classScore >= 55 ? '#854D0E' : 'var(--lagos-red)',
-                        }}
-                      >
-                        {diary.classScore}%
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-semibold text-sm">{topic?.topic ?? 'Unknown topic'}</div>
-                        <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                          {topic?.subject} &nbsp;·&nbsp; {new Date(diary.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-                        </div>
-                      </div>
-                      <div className="text-xs text-right">
-                        <div className="font-semibold" style={{ color: 'var(--text-muted)' }}>
-                          {Object.entries(diary.behavioralTraits).filter(([, v]) => v === 'high').length}/5 high
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+              <div className="text-center py-16 rounded-2xl" style={{ background: 'white' }}>
+                <p className="text-3xl mb-3">🎓</p>
+                <p className="font-semibold" style={{ color: '#374151' }}>No career prediction yet</p>
+                <p className="text-sm mt-1" style={{ color: '#9CA3AF' }}>Requires readiness data across multiple subjects</p>
               </div>
             )}
           </div>
