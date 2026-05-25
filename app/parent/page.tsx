@@ -9,6 +9,7 @@ import {
   studentStore, metricsStore, hotspotStore, diaryStore,
   schoolStore, classStore, attendanceStore, messageStore, auth,
 } from '@/lib/storage';
+import { scoreColor, SCORE_GREEN, SCORE_YELLOW } from '@/lib/calculations';
 import Navbar from '@/components/Navbar';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -99,8 +100,8 @@ export default function ParentDashboard() {
     ? Math.round(subjectMetrics.reduce((a, m) => a + m.readinessScore, 0) / subjectMetrics.length)
     : 0;
 
-  const statusColor = overallAvg >= 75 ? '#008751' : overallAvg >= 55 ? '#FFCC00' : '#E30613';
-  const statusLabel = overallAvg >= 75 ? 'On Track' : overallAvg >= 55 ? 'Needs Support' : 'At Risk';
+  const statusColor = scoreColor(overallAvg);
+  const statusLabel = overallAvg >= SCORE_GREEN ? 'On Track' : overallAvg >= SCORE_YELLOW ? 'Needs Support' : 'At Risk';
   const criticalHs  = hotspots.filter((h) => h.severity === 'critical');
 
   const unreadCount = messages.filter((m) => !m.isRead).length;
@@ -304,7 +305,7 @@ export default function ParentDashboard() {
                 </div>
                 <span
                   className="px-2 py-1 rounded-full text-xs font-bold"
-                  style={{ background: overallAvg >= 75 ? '#DCFCE7' : overallAvg >= 55 ? '#FEF9C3' : '#FEE2E2', color: statusColor }}
+                  style={{ background: overallAvg >= SCORE_GREEN ? '#DCFCE7' : overallAvg >= SCORE_YELLOW ? '#FEF9C3' : '#FEE2E2', color: statusColor }}
                 >
                   {statusLabel}
                 </span>
@@ -348,7 +349,7 @@ export default function ParentDashboard() {
                   {CORE_SUBJECTS.map((subject) => {
                     const metric = subjectMetrics.find((m) => m.subject === subject);
                     const score  = metric?.readinessScore ?? 0;
-                    const barCol = score >= 75 ? '#008751' : score >= 55 ? '#FFCC00' : score > 0 ? '#E30613' : '#D1D5DB';
+                    const barCol = score >= SCORE_GREEN ? '#008751' : score >= SCORE_YELLOW ? '#FFCC00' : score > 0 ? '#E30613' : '#D1D5DB';
                     return (
                       <div key={subject} className="flex items-center gap-3">
                         <p className="text-xs font-medium shrink-0" style={{ width: 120, color: '#374151' }}>{subject}</p>
@@ -387,9 +388,9 @@ export default function ParentDashboard() {
 
               {/* Footer advice */}
               <p className="text-xs pt-3" style={{ borderTop: '1px solid #E5E7EB', color: '#6B7280' }}>
-                {overallAvg >= 75
+                {overallAvg >= SCORE_GREEN
                   ? `${child.name.split(' ')[0]} is performing well — keep encouraging daily study!`
-                  : overallAvg >= 55
+                  : overallAvg >= SCORE_YELLOW
                     ? `${child.name.split(' ')[0]} needs consistent study time this week. Ask about the highlighted subjects.`
                     : `Please speak with ${child.name.split(' ')[0]}'s teacher urgently — extra support is needed now.`}
               </p>

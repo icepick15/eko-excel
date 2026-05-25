@@ -16,7 +16,7 @@ import {
   diaryStore, classStore, snapshotStore, careerStore,
   messageStore, interventionStore,
 } from '@/lib/storage';
-import { recomputeStudent } from '@/lib/calculations';
+import { recomputeStudent, scoreColor, SCORE_GREEN, SCORE_YELLOW } from '@/lib/calculations';
 import Navbar from '@/components/Navbar';
 
 function uid(): string {
@@ -91,7 +91,7 @@ export default function StudentProfilePage() {
   const avgReadiness = metrics.length > 0
     ? Math.round(metrics.reduce((a, m) => a + m.readinessScore, 0) / metrics.length)
     : 0;
-  const overallColor = avgReadiness >= 75 ? '#008751' : avgReadiness >= 55 ? '#FFCC00' : '#E30613';
+  const overallColor = scoreColor(avgReadiness);
 
   function handleLogIntervention() {
     if (!intDesc.trim() || !user) return;
@@ -282,7 +282,7 @@ export default function StudentProfilePage() {
             {CORE_SUBJECTS.map((subject) => {
               const metric = metrics.find((m) => m.subject === subject);
               const score = metric?.readinessScore ?? 0;
-              const color = score >= 75 ? '#008751' : score >= 55 ? '#FFCC00' : '#E30613';
+              const color = scoreColor(score);
               return (
                 <div
                   key={subject}
@@ -300,7 +300,7 @@ export default function StudentProfilePage() {
                     />
                   </div>
                   <p className="text-xs mt-1" style={{ color: '#9CA3AF' }}>
-                    {score >= 75 ? 'On track for WAEC' : score >= 55 ? 'Needs improvement' : 'At risk — below threshold'}
+                    {score >= SCORE_GREEN ? 'On track for WAEC' : score >= SCORE_YELLOW ? 'Needs improvement' : 'At risk — below threshold'}
                   </p>
                 </div>
               );
@@ -390,7 +390,7 @@ export default function StudentProfilePage() {
               if (subSnaps.length === 0) return null;
               const latest = subSnaps[subSnaps.length - 1].readinessScore;
               const max = Math.max(...subSnaps.map((s) => s.readinessScore));
-              const trendColor = latest >= 75 ? '#008751' : latest >= 55 ? '#FFCC00' : '#E30613';
+              const trendColor = scoreColor(latest);
               const trendDir = subSnaps.length >= 2
                 ? subSnaps[subSnaps.length - 1].readinessScore > subSnaps[subSnaps.length - 2].readinessScore + 3
                   ? '↑' : subSnaps[subSnaps.length - 1].readinessScore < subSnaps[subSnaps.length - 2].readinessScore - 3
@@ -416,7 +416,7 @@ export default function StudentProfilePage() {
                   <div className="flex items-end gap-1" style={{ height: 48 }}>
                     {subSnaps.slice(-12).map((snap, i) => {
                       const h = max > 0 ? (snap.readinessScore / max) * 48 : 4;
-                      const c = snap.readinessScore >= 75 ? '#008751' : snap.readinessScore >= 55 ? '#FFCC00' : '#E30613';
+                      const c = scoreColor(snap.readinessScore);
                       return (
                         <div
                           key={i}
@@ -487,7 +487,7 @@ export default function StudentProfilePage() {
                 <div className="rounded-2xl p-4" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
                   <h3 className="font-bold text-sm mb-3" style={{ color: '#0033A0' }}>Subject Scores</h3>
                   {Object.entries(career.subjectScores).map(([subj, score]) => {
-                    const c = score >= 75 ? '#008751' : score >= 55 ? '#FFCC00' : '#E30613';
+                    const c = scoreColor(score);
                     return (
                       <div key={subj} className="mb-3">
                         <div className="flex justify-between text-xs mb-1">

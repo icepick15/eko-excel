@@ -6,7 +6,8 @@ import { useAuth } from '@/lib/auth-context';
 import { Role, ColorStatus, CORE_SUBJECTS } from '@/lib/types';
 import type { District, School, Student } from '@/lib/types';
 import { districtStore, schoolStore, studentStore, metricsStore, hotspotStore } from '@/lib/storage';
-import { getSchoolReadinessAvg } from '@/lib/calculations';
+import { getSchoolReadinessAvg, scoreColor, scoreBg, SCORE_GREEN, SCORE_YELLOW, getStateTrend, getDistrictTrend } from '@/lib/calculations';
+import TrendChart from '@/components/TrendChart';
 import Navbar from '@/components/Navbar';
 
 // Lagos LGA list mapped to districts
@@ -53,12 +54,12 @@ export default function MinistryDashboard() {
     ? Math.round(allStudents.reduce((a, s) => a + getStudentAvg(s.id), 0) / allStudents.length)
     : 0;
 
-  const greenCnt = allStudents.filter((s) => getStudentAvg(s.id) >= 75).length;
-  const yellowCnt= allStudents.filter((s) => { const a = getStudentAvg(s.id); return a >= 55 && a < 75; }).length;
-  const redCnt   = allStudents.filter((s) => getStudentAvg(s.id) < 55).length;
+  const greenCnt = allStudents.filter((s) => getStudentAvg(s.id) >= SCORE_GREEN).length;
+  const yellowCnt= allStudents.filter((s) => { const a = getStudentAvg(s.id); return a >= SCORE_YELLOW && a < SCORE_GREEN; }).length;
+  const redCnt   = allStudents.filter((s) => getStudentAvg(s.id) < SCORE_YELLOW).length;
   const totalHs  = allStudents.reduce((a, s) => a + hotspotStore.getByStudent(s.id).length, 0);
 
-  const stateColor = stateAvg >= 75 ? '#008751' : stateAvg >= 55 ? '#FFCC00' : '#E30613';
+  const stateColor = scoreColor(stateAvg);
 
   // Gender equity
   const maleStudents   = allStudents.filter((s) => s.gender === 'M');
@@ -108,7 +109,7 @@ export default function MinistryDashboard() {
                   <div className="h-3 rounded-full" style={{ width: `${stateAvg}%`, background: stateColor }} />
                 </div>
                 <div className="flex justify-between text-xs mt-1 opacity-50">
-                  <span>0%</span><span>55%</span><span>75%</span><span>100%</span>
+                  <span>0%</span><span>40%</span><span>70%</span><span>100%</span>
                 </div>
               </div>
             </div>
@@ -137,9 +138,13 @@ export default function MinistryDashboard() {
               .map((d) => ({ d, avg: districtAvg(d.id), studs: studentStore.getByDistrict(d.id), hs: hotspotStore.getByDistrict(d.id).length }))
               .sort((a, b) => b.avg - a.avg)
               .map(({ d, avg, studs, hs }, rank) => {
-                const color = avg >= 75 ? '#008751' : avg >= 55 ? '#FFCC00' : '#E30613';
+                const color = scoreColor(avg);
                 return (
-                  <div key={d.id} className="flex items-center gap-3">
+                  <button
+                    key={d.id}
+                    onClick={() => router.push(`/district?id=${d.id}`)}
+                    className="flex items-center gap-3 w-full text-left"
+                  >
                     <div
                       className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-black shrink-0"
                       style={{ background: rank === 0 ? '#DCFCE7' : rank === districts.length - 1 ? '#FEE2E2' : '#F3F4F6', color: rank === 0 ? '#008751' : rank === districts.length - 1 ? '#E30613' : '#6B7280' }}
@@ -160,9 +165,10 @@ export default function MinistryDashboard() {
                       <p className="text-sm font-black" style={{ color }}>{avg}%</p>
                       <p className="text-xs" style={{ color: '#9CA3AF' }}>
                         {studs.length}stu {hs > 0 && <span style={{ color: '#E30613' }}>·{hs}🔥</span>}
+                        <span className="ml-1 opacity-40">→</span>
                       </p>
                     </div>
-                  </div>
+                  </button>
                 );
               })}
           </div>
@@ -172,7 +178,7 @@ export default function MinistryDashboard() {
         <div className="rounded-2xl p-4 mb-5" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
           <h2 className="font-bold text-sm mb-3" style={{ color: '#0033A0' }}>Subject Performance Ranking</h2>
           {subjectRanking.map(({ subject, avg }, i) => {
-            const color = avg >= 75 ? '#008751' : avg >= 55 ? '#FFCC00' : '#E30613';
+            const color = scoreColor(avg);
             return (
               <div key={subject} className="flex items-center gap-3 mb-3">
                 <div className="w-6 text-xs font-black text-right shrink-0" style={{ color: '#9CA3AF' }}>#{i + 1}</div>
@@ -235,8 +241,8 @@ export default function MinistryDashboard() {
                       </td>
                       {CORE_SUBJECTS.map((subject) => {
                         const avg = districtAvg(d.id, subject);
-                        const bg  = avg >= 75 ? '#DCFCE7' : avg >= 55 ? '#FEF9C3' : avg > 0 ? '#FEE2E2' : '#F3F4F6';
-                        const col = avg >= 75 ? '#008751' : avg >= 55 ? '#854D0E' : avg > 0 ? '#E30613' : '#9CA3AF';
+                        const bg  = avg >= SCORE_GREEN ? '#DCFCE7' : avg >= SCORE_YELLOW ? '#FEF9C3' : avg > 0 ? '#FEE2E2' : '#F3F4F6';
+                        const col = avg >= SCORE_GREEN ? '#008751' : avg >= SCORE_YELLOW ? '#854D0E' : avg > 0 ? '#E30613' : '#9CA3AF';
                         return (
                           <td key={subject} className="px-2 py-2.5 text-center">
                             <span className="text-xs font-black px-1.5 py-0.5 rounded-full" style={{ background: bg, color: col }}>
@@ -249,8 +255,8 @@ export default function MinistryDashboard() {
                         <span
                           className="text-xs font-black px-2 py-0.5 rounded-full"
                           style={{
-                            background: overall >= 75 ? '#DCFCE7' : overall >= 55 ? '#FEF9C3' : '#FEE2E2',
-                            color: overall >= 75 ? '#008751' : overall >= 55 ? '#854D0E' : '#E30613',
+                            background: overall >= SCORE_GREEN ? '#DCFCE7' : overall >= SCORE_YELLOW ? '#FEF9C3' : '#FEE2E2',
+                            color: overall >= SCORE_GREEN ? '#008751' : overall >= SCORE_YELLOW ? '#854D0E' : '#E30613',
                           }}
                         >
                           {overall > 0 ? `${overall}%` : '—'}
@@ -261,6 +267,38 @@ export default function MinistryDashboard() {
                 })}
               </tbody>
             </table>
+          </div>
+        </div>
+
+        {/* State-wide trend */}
+        <div className="rounded-2xl p-4 mb-5" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
+          <h2 className="font-bold text-sm mb-1" style={{ color: '#0033A0' }}>State Performance Trend (8 weeks)</h2>
+          <p className="text-xs mb-3" style={{ color: '#9CA3AF' }}>Weekly average class score across all districts</p>
+          <TrendChart data={getStateTrend()} height={80} />
+
+          {/* Per-district mini trends */}
+          <div className="grid grid-cols-2 gap-4 mt-4">
+            {districts.map((d) => {
+              const tData = getDistrictTrend(d.id);
+              const latest = tData.filter((p) => p.score > 0).slice(-1)[0]?.score ?? 0;
+              return (
+                <button
+                  key={d.id}
+                  onClick={() => router.push(`/district?id=${d.id}`)}
+                  className="w-full text-left"
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-xs font-semibold truncate" style={{ color: '#374151', maxWidth: '80%' }}>
+                      {d.name.split('(')[0].trim()}
+                    </p>
+                    <span className="text-xs font-black shrink-0" style={{ color: scoreColor(latest) }}>
+                      {latest > 0 ? `${latest}%` : '—'} →
+                    </span>
+                  </div>
+                  <TrendChart data={tData} height={36} showLabels={false} />
+                </button>
+              );
+            })}
           </div>
         </div>
 

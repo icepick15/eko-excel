@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { Role, ColorStatus, CORE_SUBJECTS } from '@/lib/types';
 import type { Student, Class, User } from '@/lib/types';
@@ -9,18 +9,21 @@ import {
   studentStore, metricsStore, hotspotStore, schoolStore,
   classStore, userStore, tcsStore, messageStore,
 } from '@/lib/storage';
-import { getTeacherComplianceThisWeek, getClassReadinessAvg, getSchoolReadinessAvg } from '@/lib/calculations';
+import { getTeacherComplianceThisWeek, getClassReadinessAvg, getSchoolReadinessAvg, scoreColor, SCORE_GREEN, SCORE_YELLOW, getSchoolTrend, getClassTrend } from '@/lib/calculations';
+import TrendChart from '@/components/TrendChart';
 import Navbar from '@/components/Navbar';
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
-type Tab = 'overview' | 'heatmap' | 'teachers' | 'students';
+type Tab = 'overview' | 'heatmap' | 'trends' | 'teachers' | 'students';
 
-export default function SchoolDashboard() {
+function SchoolContent() {
   const { user, isLoading } = useAuth();
   const router = useRouter();
+  const params = useSearchParams();
+  const paramId = params.get('id');
 
   const [students,   setStudents]   = useState<Student[]>([]);
   const [classes,    setClasses]    = useState<Class[]>([]);
@@ -31,40 +34,40 @@ export default function SchoolDashboard() {
   const [search,     setSearch]     = useState('');
   const [nudging,    setNudging]    = useState<string | null>(null);
 
+  const viewSchoolId = paramId ?? user?.schoolId ?? '';
+
   useEffect(() => {
     if (isLoading) return;
     if (!user) { router.replace('/login'); return; }
 
-    const allowed = [Role.HEADTEACHER, Role.SCHOOLADMIN, Role.TEACHER];
-    if (!allowed.includes(user.role)) {
-      if (user.role === Role.STUDENT)   router.replace('/student');
+    const staffRoles = [Role.HEADTEACHER, Role.SCHOOLADMIN, Role.TEACHER];
+    const viewerRoles = [Role.DISTRICT, Role.MINISTRY];
+    if (!staffRoles.includes(user.role) && !viewerRoles.includes(user.role)) {
+      if (user.role === Role.STUDENT) router.replace('/student');
       else if (user.role === Role.PARENT) router.replace('/parent');
-      else if (user.role === Role.DISTRICT) router.replace('/district');
-      else if (user.role === Role.MINISTRY) router.replace('/ministry');
       else router.replace('/dashboard');
       return;
     }
+    // District/Ministry without an explicit id param go back to their own dashboard
+    if (viewerRoles.includes(user.role) && !paramId) {
+      router.replace(user.role === Role.DISTRICT ? '/district' : '/ministry');
+      return;
+    }
 
-    const sId = user.schoolId ?? '';
+    const sId = viewSchoolId;
     const school = schoolStore.getById(sId);
     setSchoolName(school?.name ?? 'School');
 
-    const myStudents = studentStore.getBySchool(sId);
-    setStudents(myStudents);
-
-    const myClasses = classStore.getBySchool(sId);
-    setClasses(myClasses);
-
-    const myTeachers = userStore.getTeachers(sId);
-    setTeachers(myTeachers);
-
+    setStudents(studentStore.getBySchool(sId));
+    setClasses(classStore.getBySchool(sId));
+    setTeachers(userStore.getTeachers(sId));
     setSchoolAvg(getSchoolReadinessAvg(sId));
-  }, [user, isLoading, router]);
+  }, [user, isLoading, router, viewSchoolId, paramId]);
 
   if (isLoading) return null;
   if (!user) return null;
 
-  const schoolId = user.schoolId ?? '';
+  const schoolId = viewSchoolId;
   const atRisk  = students.filter((s) => metricsStore.getByStudent(s.id).some((m) => m.colorStatus === ColorStatus.RED)).length;
   const onTrack = students.filter((s) => metricsStore.getByStudent(s.id).every((m) => m.colorStatus !== ColorStatus.RED)).length;
   const hotspotCount = hotspotStore.getBySchool(schoolId).length;
@@ -119,6 +122,7 @@ export default function SchoolDashboard() {
   const TAB_LABELS: Record<Tab, string> = {
     overview: 'Overview',
     heatmap:  'Heatmap',
+    trends:   'Trends',
     teachers: 'Teachers',
     students: 'Students',
   };
@@ -139,7 +143,7 @@ export default function SchoolDashboard() {
 
         {/* KPI strip */}
         <div className="grid grid-cols-4 gap-3 mb-5">
-          <KPICard value={`${schoolAvg}%`}  label="School Avg"   color={schoolAvg >= 75 ? '#008751' : schoolAvg >= 55 ? '#FFCC00' : '#E30613'} />
+          <KPICard value={`${schoolAvg}%`}  label="School Avg"   color={scoreColor(schoolAvg)} />
           <KPICard value={String(atRisk)}    label="At-Risk"      color={atRisk > 0 ? '#E30613' : '#008751'} />
           <KPICard value={String(hotspotCount)} label="Hotspots"  color={hotspotCount > 0 ? '#E30613' : '#008751'} />
           <KPICard value={String(teachers.filter((t) => getTeacherComplianceThisWeek(t.id).rate >= 90).length) + '/' + teachers.length}
@@ -173,7 +177,7 @@ export default function SchoolDashboard() {
               <div className="flex flex-col gap-2">
                 {classes.map((cls) => {
                   const avg = getClassReadinessAvg(cls.id);
-                  const color = avg >= 75 ? '#008751' : avg >= 55 ? '#FFCC00' : '#E30613';
+                  const color = scoreColor(avg);
                   const studs = studentStore.getByClass(cls.id);
                   return (
                     <div key={cls.id} className="flex items-center gap-3">
@@ -192,6 +196,19 @@ export default function SchoolDashboard() {
             </div>
 
             {/* Top hotspots */}
+            {/* Curriculum coverage shortcut */}
+            <button
+              onClick={() => router.push('/curriculum')}
+              className="w-full rounded-2xl p-4 mb-4 flex items-center justify-between"
+              style={{ background: '#EFF6FF', border: '1.5px solid #BFDBFE' }}
+            >
+              <div>
+                <p className="font-bold text-sm" style={{ color: '#0033A0' }}>📋 Curriculum Coverage</p>
+                <p className="text-xs mt-0.5" style={{ color: '#6B7280' }}>Check syllabus progress across all classes</p>
+              </div>
+              <span className="text-lg" style={{ color: '#0033A0' }}>→</span>
+            </button>
+
             {hotspotStore.getBySchool(schoolId).slice(0, 5).length > 0 && (
               <div className="rounded-2xl p-4 mb-4" style={{ background: 'white', border: '1.5px solid #FECACA' }}>
                 <h3 className="font-bold text-sm mb-3" style={{ color: '#E30613' }}>
@@ -252,8 +269,8 @@ export default function SchoolDashboard() {
                         {subject}
                       </td>
                       {clsData.map(({ cls, avg }) => {
-                        const bg  = avg >= 75 ? '#DCFCE7' : avg >= 55 ? '#FEF9C3' : avg > 0 ? '#FEE2E2' : '#F3F4F6';
-                        const col = avg >= 75 ? '#008751' : avg >= 55 ? '#854D0E' : avg > 0 ? '#E30613' : '#9CA3AF';
+                        const bg  = avg >= SCORE_GREEN ? '#DCFCE7' : avg >= SCORE_YELLOW ? '#FEF9C3' : avg > 0 ? '#FEE2E2' : '#F3F4F6';
+                        const col = avg >= SCORE_GREEN ? '#008751' : avg >= SCORE_YELLOW ? '#854D0E' : avg > 0 ? '#E30613' : '#9CA3AF';
                         return (
                           <td key={cls.id} className="px-2 py-2.5 text-center">
                             <span
@@ -269,6 +286,60 @@ export default function SchoolDashboard() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {/* ── Trends Tab ───────────────────────────────────────────────── */}
+        {activeTab === 'trends' && (
+          <div className="flex flex-col gap-4">
+            {/* School-wide trend */}
+            <div className="rounded-2xl p-4" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
+              <p className="font-bold text-sm mb-1" style={{ color: '#0033A0' }}>School-Wide Performance (8 weeks)</p>
+              <p className="text-xs mb-3" style={{ color: '#9CA3AF' }}>Weekly average class score across all subjects</p>
+              <TrendChart data={getSchoolTrend(schoolId)} height={80} />
+            </div>
+
+            {/* Per-subject trends */}
+            {CORE_SUBJECTS.map((subject) => {
+              const trendData = getSchoolTrend(schoolId, subject);
+              const hasData = trendData.some((p) => p.score > 0);
+              if (!hasData) return null;
+              const latest = trendData.filter((p) => p.score > 0).slice(-1)[0]?.score ?? 0;
+              return (
+                <div key={subject} className="rounded-2xl p-4" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="font-bold text-sm" style={{ color: '#374151' }}>{subject}</p>
+                    <span className="font-black text-sm" style={{ color: scoreColor(latest) }}>{latest}%</span>
+                  </div>
+                  <p className="text-xs mb-3" style={{ color: '#9CA3AF' }}>Weekly average class score</p>
+                  <TrendChart data={trendData} height={56} showLabels={false} />
+                </div>
+              );
+            })}
+
+            {/* Per-class trends */}
+            <div className="rounded-2xl p-4" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
+              <p className="font-bold text-sm mb-3" style={{ color: '#0033A0' }}>By Class</p>
+              <div className="flex flex-col gap-4">
+                {classes.map((cls) => {
+                  const trendData = getClassTrend(cls.id);
+                  const latest = trendData.filter((p) => p.score > 0).slice(-1)[0]?.score ?? 0;
+                  return (
+                    <div key={cls.id}>
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-sm font-semibold" style={{ color: '#374151' }}>
+                          {cls.level}{cls.section}
+                        </p>
+                        <span className="text-xs font-black" style={{ color: scoreColor(latest) }}>
+                          {latest > 0 ? `${latest}%` : '—'}
+                        </span>
+                      </div>
+                      <TrendChart data={trendData} height={44} showLabels={false} />
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         )}
@@ -358,7 +429,7 @@ export default function SchoolDashboard() {
               {filteredStudents.map((s) => {
                 const ms  = metricsStore.getByStudent(s.id);
                 const avg = ms.length > 0 ? Math.round(ms.reduce((a, m) => a + m.readinessScore, 0) / ms.length) : 0;
-                const col = avg >= 75 ? '#008751' : avg >= 55 ? '#FFCC00' : '#E30613';
+                const col = scoreColor(avg);
                 const cls = classStore.getById(s.classId);
                 const hs  = hotspotStore.getByStudent(s.id).length;
                 return (
@@ -393,6 +464,14 @@ export default function SchoolDashboard() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function SchoolDashboard() {
+  return (
+    <Suspense fallback={null}>
+      <SchoolContent />
+    </Suspense>
   );
 }
 

@@ -6,17 +6,42 @@ import type {
 import {
   diaryStore, topicStore, metricsStore, snapshotStore,
   brainMapStore, hotspotStore, quizAttemptStore, careerStore,
-  studentStore, attendanceStore, classStore,
+  studentStore, attendanceStore, classStore, schoolStore, districtStore,
 } from './storage';
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
+// Spec thresholds: RED <40%, YELLOW 40–70%, GREEN ≥70%
+export const SCORE_GREEN  = 70;
+export const SCORE_YELLOW = 40;
+
 export function getColorStatus(score: number): ColorStatus {
-  if (score >= 75) return ColorStatus.GREEN;
-  if (score >= 55) return ColorStatus.YELLOW;
+  if (score >= SCORE_GREEN)  return ColorStatus.GREEN;
+  if (score >= SCORE_YELLOW) return ColorStatus.YELLOW;
   return ColorStatus.RED;
+}
+
+export function scoreColor(score: number): string {
+  if (score >= SCORE_GREEN)  return '#008751';
+  if (score >= SCORE_YELLOW) return '#FFCC00';
+  return '#E30613';
+}
+export function scoreBg(score: number): string {
+  if (score >= SCORE_GREEN)  return '#F0FDF4';
+  if (score >= SCORE_YELLOW) return '#FFFBEB';
+  return '#FEF2F2';
+}
+export function scoreBorder(score: number): string {
+  if (score >= SCORE_GREEN)  return '#86EFAC';
+  if (score >= SCORE_YELLOW) return '#FDE68A';
+  return '#FECACA';
+}
+export function scoreLabel(score: number): string {
+  if (score >= SCORE_GREEN)  return 'MASTERED';
+  if (score >= SCORE_YELLOW) return 'CAUTION ZONE';
+  return 'CRITICAL HOTSPOT';
 }
 
 // ============= WAEC Readiness Meter =============
@@ -245,47 +270,33 @@ function generateHomeAction(profiles: string[]): string {
 }
 
 // ============= Hotspot Detection =============
-// Creates a hotspot for each subject where readiness < 55% (red) or flags yellow at 55–74%
+// Creates a hotspot for each subject where readiness < 55%.
+// Uses deterministic IDs (studentId + subject) so re-runs are idempotent.
+// Clears any stale/corrupt hotspots first.
 export function detectHotspots(studentId: string): Hotspot[] {
-  const existingOpen = hotspotStore.getByStudent(studentId);
-  const existingSubjects = new Set(existingOpen.map((h) => h.subject));
+  // Wipe stale open hotspots (includes corrupt entries from old seeds)
+  hotspotStore.resetForStudent(studentId);
+
   const newHotspots: Hotspot[] = [];
 
   for (const subject of CORE_SUBJECTS) {
     const metric = metricsStore.getByStudentAndSubject(studentId, subject)
       ?? calculateReadiness(studentId, subject);
 
-    if (metric.readinessScore < 55) {
-      // Check if already open for this subject
-      if (existingSubjects.has(subject)) {
-        // Update severity on existing
-        const existing = existingOpen.find((h) => h.subject === subject);
-        if (existing) {
-          existing.readinessScore = metric.readinessScore;
-          existing.severity = metric.readinessScore < 40 ? 'critical' : 'high';
-          existing.trend = getTrend(studentId, subject);
-          hotspotStore.save(existing);
-        }
-        continue;
-      }
+    // Only create a hotspot if score is meaningfully low (> 0 ensures we have real data)
+    if (metric.readinessScore > 0 && metric.readinessScore < SCORE_GREEN) {
       const hotspot: Hotspot = {
-        id: uid(),
+        id: `hs-${studentId}-${subject.replace(/\s+/g, '-')}`,
         studentId,
         subject,
         readinessScore: metric.readinessScore,
-        severity: metric.readinessScore < 40 ? 'critical' : 'high',
+        severity: metric.readinessScore < SCORE_YELLOW ? 'critical' : 'high',
         trend: getTrend(studentId, subject),
         description: `${subject} readiness is ${metric.readinessScore.toFixed(0)}% — below 55% threshold`,
         detectedAt: new Date().toISOString(),
       };
       hotspotStore.save(hotspot);
       newHotspots.push(hotspot);
-    } else {
-      // Auto-resolve: if readiness ≥ 65%, mark resolved
-      const existing = existingOpen.find((h) => h.subject === subject);
-      if (existing && metric.readinessScore >= 65) {
-        hotspotStore.resolve(existing.id);
-      }
     }
   }
 
@@ -406,4 +417,239 @@ export function getSchoolReadinessAvg(schoolId: string): number {
     return ms.reduce((a, m) => a + m.readinessScore, 0) / ms.length;
   });
   return Math.round(totals.reduce((a, b) => a + b, 0) / totals.length);
+}
+
+// ============= Curriculum Coverage =============
+
+export interface CurriculumCoverageItem {
+  topicId: string;
+  topic: string;
+  subTopic?: string;
+  waecWeight: number;
+  coveredCount: number;
+  lastCoveredAt: string | null;
+}
+
+export interface SubjectCoverage {
+  subject: string;
+  totalTopics: number;
+  coveredTopics: number;
+  coveragePercent: number;
+  items: CurriculumCoverageItem[];
+}
+
+export function getClassSubjectCoverage(classId: string, subject: string): SubjectCoverage {
+  const cls = classStore.getById(classId);
+  const allTopics = topicStore.getAll().filter(
+    (t) => t.subject === subject && t.classLevel === cls?.level
+  );
+  const diaries = diaryStore.getByClass(classId).filter((d) => d.subject === subject);
+
+  const coverage = new Map<string, { count: number; lastAt: string }>();
+  for (const d of diaries) {
+    for (const tid of d.topicIds) {
+      const existing = coverage.get(tid);
+      if (!existing) {
+        coverage.set(tid, { count: 1, lastAt: d.submittedAt });
+      } else {
+        existing.count++;
+        if (d.submittedAt > existing.lastAt) existing.lastAt = d.submittedAt;
+      }
+    }
+  }
+
+  const items: CurriculumCoverageItem[] = allTopics.map((t) => {
+    const cov = coverage.get(t.id);
+    return {
+      topicId: t.id,
+      topic: t.topic,
+      subTopic: t.subTopic,
+      waecWeight: t.waecWeight,
+      coveredCount: cov?.count ?? 0,
+      lastCoveredAt: cov?.lastAt ?? null,
+    };
+  });
+
+  const coveredTopics = items.filter((i) => i.coveredCount > 0).length;
+  return {
+    subject,
+    totalTopics: allTopics.length,
+    coveredTopics,
+    coveragePercent: allTopics.length > 0 ? Math.round((coveredTopics / allTopics.length) * 100) : 0,
+    items,
+  };
+}
+
+export function getClassCoverage(classId: string): SubjectCoverage[] {
+  return CORE_SUBJECTS.map((subject) => getClassSubjectCoverage(classId, subject));
+}
+
+export function getSchoolSubjectCoverage(schoolId: string): SubjectCoverage[] {
+  const classes = classStore.getBySchool(schoolId);
+  if (classes.length === 0) {
+    return CORE_SUBJECTS.map((s) => ({ subject: s, totalTopics: 0, coveredTopics: 0, coveragePercent: 0, items: [] }));
+  }
+  return CORE_SUBJECTS.map((subject) => {
+    const classCoverages = classes.map((cls) => getClassSubjectCoverage(cls.id, subject));
+    const totalTopics   = classCoverages.reduce((a, c) => a + c.totalTopics, 0);
+    const coveredTopics = classCoverages.reduce((a, c) => a + c.coveredTopics, 0);
+    return {
+      subject,
+      totalTopics,
+      coveredTopics,
+      coveragePercent: totalTopics > 0 ? Math.round((coveredTopics / totalTopics) * 100) : 0,
+      items: [],
+    };
+  });
+}
+
+export function getDistrictSubjectCoverage(districtId: string): SubjectCoverage[] {
+  const schools = schoolStore.getByDistrict(districtId);
+  if (schools.length === 0) {
+    return CORE_SUBJECTS.map((s) => ({ subject: s, totalTopics: 0, coveredTopics: 0, coveragePercent: 0, items: [] }));
+  }
+  return CORE_SUBJECTS.map((subject) => {
+    const schoolCoverages = schools.map((sc) => getSchoolSubjectCoverage(sc.id).find((c) => c.subject === subject)!);
+    const totalTopics   = schoolCoverages.reduce((a, c) => a + c.totalTopics, 0);
+    const coveredTopics = schoolCoverages.reduce((a, c) => a + c.coveredTopics, 0);
+    return {
+      subject,
+      totalTopics,
+      coveredTopics,
+      coveragePercent: totalTopics > 0 ? Math.round((coveredTopics / totalTopics) * 100) : 0,
+      items: [],
+    };
+  });
+}
+
+export function getStateSubjectCoverage(): SubjectCoverage[] {
+  const districts = districtStore.getAll();
+  if (districts.length === 0) {
+    return CORE_SUBJECTS.map((s) => ({ subject: s, totalTopics: 0, coveredTopics: 0, coveragePercent: 0, items: [] }));
+  }
+  return CORE_SUBJECTS.map((subject) => {
+    const districtCoverages = districts.map((d) => getDistrictSubjectCoverage(d.id).find((c) => c.subject === subject)!);
+    const totalTopics   = districtCoverages.reduce((a, c) => a + c.totalTopics, 0);
+    const coveredTopics = districtCoverages.reduce((a, c) => a + c.coveredTopics, 0);
+    return {
+      subject,
+      totalTopics,
+      coveredTopics,
+      coveragePercent: totalTopics > 0 ? Math.round((coveredTopics / totalTopics) * 100) : 0,
+      items: [],
+    };
+  });
+}
+
+// ============= Trend Charts =============
+// Derived from diary classScore weekly averages (has 8 weeks of historical data).
+// Snapshots only have today's date, so we use diary data for richer history.
+
+export interface TrendPoint {
+  weekStart: string;  // YYYY-MM-DD Monday of that week
+  label: string;      // short display label e.g. "Apr 14"
+  score: number;      // 0–100 average class performance
+}
+
+function isoWeekStart(dateStr: string): string {
+  const d = new Date(dateStr);
+  const day = d.getUTCDay(); // 0=Sun
+  const diff = day === 0 ? -6 : 1 - day; // back to Monday
+  d.setUTCDate(d.getUTCDate() + diff);
+  return d.toISOString().slice(0, 10);
+}
+
+function weekLabel(dateStr: string): string {
+  const d = new Date(dateStr);
+  return d.toLocaleDateString('en-NG', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+
+function aggregateByWeek(entries: { date: string; score: number }[], weeks: number): TrendPoint[] {
+  const now = new Date();
+  const buckets = new Map<string, number[]>();
+
+  // Initialise empty buckets for the last N weeks
+  for (let i = weeks - 1; i >= 0; i--) {
+    const d = new Date(now);
+    d.setUTCDate(d.getUTCDate() - i * 7);
+    const ws = isoWeekStart(d.toISOString().slice(0, 10));
+    if (!buckets.has(ws)) buckets.set(ws, []);
+  }
+
+  for (const e of entries) {
+    const ws = isoWeekStart(e.date);
+    if (buckets.has(ws)) {
+      buckets.get(ws)!.push(e.score);
+    }
+  }
+
+  return Array.from(buckets.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([ws, scores]) => ({
+      weekStart: ws,
+      label: weekLabel(ws),
+      score: scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0,
+    }));
+}
+
+// Class trend: average diary classScore per week (optionally filtered by subject)
+export function getClassTrend(classId: string, subject?: string, weeks = 8): TrendPoint[] {
+  const diaries = diaryStore.getByClass(classId)
+    .filter((d) => !subject || d.subject === subject);
+  const entries = diaries.map((d) => ({
+    date: d.submittedAt.slice(0, 10),
+    score: d.classScore,
+  }));
+  return aggregateByWeek(entries, weeks);
+}
+
+// School trend: average diary classScore per week across all classes
+export function getSchoolTrend(schoolId: string, subject?: string, weeks = 8): TrendPoint[] {
+  const classes = classStore.getBySchool(schoolId);
+  const entries: { date: string; score: number }[] = [];
+  for (const cls of classes) {
+    const diaries = diaryStore.getByClass(cls.id)
+      .filter((d) => !subject || d.subject === subject);
+    for (const d of diaries) {
+      entries.push({ date: d.submittedAt.slice(0, 10), score: d.classScore });
+    }
+  }
+  return aggregateByWeek(entries, weeks);
+}
+
+// District trend: average across all schools in the district
+export function getDistrictTrend(districtId: string, subject?: string, weeks = 8): TrendPoint[] {
+  const schools = schoolStore.getByDistrict(districtId);
+  const entries: { date: string; score: number }[] = [];
+  for (const sc of schools) {
+    const classes = classStore.getBySchool(sc.id);
+    for (const cls of classes) {
+      const diaries = diaryStore.getByClass(cls.id)
+        .filter((d) => !subject || d.subject === subject);
+      for (const d of diaries) {
+        entries.push({ date: d.submittedAt.slice(0, 10), score: d.classScore });
+      }
+    }
+  }
+  return aggregateByWeek(entries, weeks);
+}
+
+// State-wide trend
+export function getStateTrend(subject?: string, weeks = 8): TrendPoint[] {
+  const districts = districtStore.getAll();
+  const entries: { date: string; score: number }[] = [];
+  for (const dist of districts) {
+    const schools = schoolStore.getByDistrict(dist.id);
+    for (const sc of schools) {
+      const classes = classStore.getBySchool(sc.id);
+      for (const cls of classes) {
+        const diaries = diaryStore.getByClass(cls.id)
+          .filter((d) => !subject || d.subject === subject);
+        for (const d of diaries) {
+          entries.push({ date: d.submittedAt.slice(0, 10), score: d.classScore });
+        }
+      }
+    }
+  }
+  return aggregateByWeek(entries, weeks);
 }

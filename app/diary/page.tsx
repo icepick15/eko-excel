@@ -114,14 +114,14 @@ export default function DiaryEntryPage() {
   }
 
   function scoreColor(score: number): string {
-    if (score >= 75) return '#008751';
-    if (score >= 55) return '#FFCC00';
+    if (score >= 70) return '#008751';
+    if (score >= 40) return '#FFCC00';
     return '#E30613';
   }
 
   function scoreLabel(score: number): string {
-    if (score >= 75) return 'Good performance';
-    if (score >= 55) return 'Needs improvement';
+    if (score >= 70) return 'Good performance';
+    if (score >= 40) return 'Needs improvement';
     return 'Below threshold';
   }
 

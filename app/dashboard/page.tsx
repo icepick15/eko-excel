@@ -10,7 +10,7 @@ import {
   tcsStore, classStore, timetableStore, notificationStore, messageStore,
   schoolStore,
 } from '@/lib/storage';
-import { getTeacherComplianceThisWeek } from '@/lib/calculations';
+import { getTeacherComplianceThisWeek, SCORE_GREEN, SCORE_YELLOW } from '@/lib/calculations';
 import Navbar from '@/components/Navbar';
 
 function timeOfDay(): string {
@@ -156,18 +156,31 @@ export default function TeacherDashboard() {
           <ImpactPill value={String(atRiskCount)} label="At-Risk" color={atRiskCount > 0 ? '#F97316' : '#008751'} />
         </div>
 
-        {/* ── Diary CTA ─────────────────────────────────────────────── */}
-        <button
-          onClick={() => router.push('/diary')}
-          className="w-full rounded-2xl p-4 mb-5 flex items-center justify-between transition-all active:scale-98"
-          style={{ background: '#008751', color: 'white', boxShadow: '0 4px 14px rgba(0,135,81,0.35)' }}
-        >
-          <div className="text-left">
-            <p className="font-black text-base">+ Log Today&apos;s Diary</p>
-            <p className="text-xs opacity-75 mt-0.5">Under 2 minutes · Updates WAEC readiness</p>
-          </div>
-          <span className="text-2xl">📓</span>
-        </button>
+        {/* ── Primary CTAs ──────────────────────────────────────────── */}
+        <div className="flex gap-3 mb-5">
+          <button
+            onClick={() => router.push('/diary')}
+            className="flex-1 rounded-2xl p-4 flex items-center justify-between transition-all active:scale-98"
+            style={{ background: '#008751', color: 'white', boxShadow: '0 4px 14px rgba(0,135,81,0.35)' }}
+          >
+            <div className="text-left">
+              <p className="font-black text-sm">+ Log Diary</p>
+              <p className="text-xs opacity-75 mt-0.5">Under 2 min</p>
+            </div>
+            <span className="text-2xl">📓</span>
+          </button>
+          <button
+            onClick={() => router.push('/curriculum')}
+            className="flex-1 rounded-2xl p-4 flex items-center justify-between transition-all active:scale-98"
+            style={{ background: '#0033A0', color: 'white', boxShadow: '0 4px 14px rgba(0,51,160,0.25)' }}
+          >
+            <div className="text-left">
+              <p className="font-black text-sm">Coverage</p>
+              <p className="text-xs opacity-75 mt-0.5">Syllabus audit</p>
+            </div>
+            <span className="text-2xl">📋</span>
+          </button>
+        </div>
 
         {/* ── Today's Timetable ──────────────────────────────────────── */}
         {dow > 0 && (
@@ -288,8 +301,8 @@ export default function TeacherDashboard() {
                     <div
                       className="w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm shrink-0"
                       style={{
-                        background: d.classScore >= 75 ? '#DCFCE7' : d.classScore >= 55 ? '#FEF9C3' : '#FEE2E2',
-                        color: d.classScore >= 75 ? '#008751' : d.classScore >= 55 ? '#854D0E' : '#E30613',
+                        background: d.classScore >= SCORE_GREEN ? '#DCFCE7' : d.classScore >= SCORE_YELLOW ? '#FEF9C3' : '#FEE2E2',
+                        color: d.classScore >= SCORE_GREEN ? '#008751' : d.classScore >= SCORE_YELLOW ? '#854D0E' : '#E30613',
                       }}
                     >
                       {d.classScore}%

@@ -170,7 +170,7 @@ export default function HotspotsPage() {
           <div className="text-center py-16 rounded-2xl" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
             <p className="text-4xl mb-3">✅</p>
             <p className="font-semibold" style={{ color: '#374151' }}>No active hotspots</p>
-            <p className="text-sm mt-1" style={{ color: '#9CA3AF' }}>All students are above the 55% readiness threshold</p>
+            <p className="text-sm mt-1" style={{ color: '#9CA3AF' }}>All students are above the 70% readiness threshold</p>
           </div>
         ) : (
           <div className="flex flex-col gap-3 mb-6">

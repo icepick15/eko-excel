@@ -268,20 +268,25 @@ export const brainMapStore = {
 export const hotspotStore = {
   getAll:       ()             => get<Hotspot>(K.hotspots),
   getOpen:      ()             => get<Hotspot>(K.hotspots).filter((h) => !h.resolvedAt),
-  getByStudent: (sId: string)  => get<Hotspot>(K.hotspots).filter((h) => h.studentId === sId && !h.resolvedAt),
+  getByStudent: (sId: string)  => get<Hotspot>(K.hotspots).filter((h) => h.studentId === sId && !h.resolvedAt && !!h.subject),
   getBySchool:  (sId: string)  => {
     const studentIds = new Set(studentStore.getBySchool(sId).map((s) => s.id));
-    return get<Hotspot>(K.hotspots).filter((h) => studentIds.has(h.studentId) && !h.resolvedAt);
+    return get<Hotspot>(K.hotspots).filter((h) => studentIds.has(h.studentId) && !h.resolvedAt && !!h.subject);
   },
   getByDistrict:(dId: string)  => {
     const studentIds = new Set(studentStore.getByDistrict(dId).map((s) => s.id));
-    return get<Hotspot>(K.hotspots).filter((h) => studentIds.has(h.studentId) && !h.resolvedAt);
+    return get<Hotspot>(K.hotspots).filter((h) => studentIds.has(h.studentId) && !h.resolvedAt && !!h.subject);
   },
   save:         (h: Hotspot)   => upsert(K.hotspots, h),
   resolve:      (id: string)   => {
     const all = get<Hotspot>(K.hotspots);
     const idx = all.findIndex((h) => h.id === id);
     if (idx >= 0) { all[idx].resolvedAt = new Date().toISOString(); set(K.hotspots, all); }
+  },
+  // Wipe all open hotspots for a student so detectHotspots can recreate them cleanly
+  resetForStudent: (sId: string) => {
+    const all = get<Hotspot>(K.hotspots).filter((h) => h.studentId !== sId || !!h.resolvedAt);
+    set(K.hotspots, all);
   },
 };
 
