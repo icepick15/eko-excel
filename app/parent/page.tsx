@@ -7,7 +7,7 @@ import { Role, CORE_SUBJECTS } from '@/lib/types';
 import type { Student, Message } from '@/lib/types';
 import {
   studentStore, metricsStore, hotspotStore, diaryStore,
-  schoolStore, classStore, attendanceStore, messageStore,
+  schoolStore, classStore, attendanceStore, messageStore, auth,
 } from '@/lib/storage';
 import Navbar from '@/components/Navbar';
 
@@ -46,23 +46,43 @@ export default function ParentDashboard() {
 
   useEffect(() => {
     if (isLoading) return;
-    if (!user)                { router.replace('/login'); return; }
+    if (!user)                     { router.replace('/login'); return; }
     if (user.role !== Role.PARENT) { router.replace('/login'); return; }
 
     const ids = user.childIds ?? [];
-    if (ids.length === 0)     { router.replace('/login'); return; }
+    if (ids.length === 0) { setChildren([]); return; }
 
     const kids = ids.map((id) => studentStore.getById(id)).filter(Boolean) as Student[];
     setChildren(kids);
     setMessages(messageStore.getForUser(user.id));
   }, [user, isLoading, router]);
 
-  if (isLoading || children.length === 0) {
+  if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: '#0033A0' }}>
         <div className="text-white text-center">
           <div className="text-xl font-bold mb-2">Eko Excel</div>
           <div className="text-sm" style={{ color: '#BFDBFE' }}>Loading report…</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isLoading && user && children.length === 0) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#0033A0' }}>
+        <div className="text-white text-center px-6">
+          <div className="text-xl font-bold mb-2">No children linked</div>
+          <div className="text-sm mb-4" style={{ color: '#BFDBFE' }}>
+            Your account has no students linked to it. Please contact your school administrator.
+          </div>
+          <button
+            onClick={() => { auth.logout(); router.replace('/login'); }}
+            className="px-4 py-2 rounded-lg text-sm font-semibold"
+            style={{ background: 'rgba(255,255,255,0.15)', color: 'white', border: '1px solid rgba(255,255,255,0.3)' }}
+          >
+            Sign out
+          </button>
         </div>
       </div>
     );
