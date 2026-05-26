@@ -7,12 +7,12 @@ import type { Notification } from '@/lib/types';
 import { notificationStore } from '@/lib/storage';
 import Navbar from '@/components/Navbar';
 
-const TYPE_STYLE: Record<string, { bg: string; color: string; icon: string; label: string }> = {
-  nudge:        { bg: '#EFF6FF', color: '#0033A0', icon: '💬', label: 'Nudge' },
-  query:        { bg: '#FEF9C3', color: '#854D0E', icon: '❓', label: 'Query' },
-  hotspot:      { bg: '#FEE2E2', color: '#E30613', icon: '🔥', label: 'Alert' },
-  intervention: { bg: '#DCFCE7', color: '#008751', icon: '🎯', label: 'Intervention' },
-  report:       { bg: '#F3E8FF', color: '#7C3AED', icon: '📊', label: 'Report' },
+const TYPE_STYLE: Record<string, { bg: string; color: string; icon: string; label: string; cta: string }> = {
+  nudge:        { bg: '#EFF6FF', color: '#0033A0', icon: '💬', label: 'Nudge',        cta: 'Log diary →'          },
+  query:        { bg: '#FEF9C3', color: '#854D0E', icon: '❓', label: 'Query',        cta: 'Review compliance →'  },
+  hotspot:      { bg: '#FEE2E2', color: '#E30613', icon: '🔥', label: 'Alert',        cta: 'View details →'       },
+  intervention: { bg: '#DCFCE7', color: '#008751', icon: '🎯', label: 'Intervention', cta: 'View tasks →'         },
+  report:       { bg: '#F3E8FF', color: '#7C3AED', icon: '📊', label: 'Report',       cta: 'Open report →'        },
 };
 
 export default function NotificationsPage() {
@@ -115,8 +115,8 @@ export default function NotificationsPage() {
                     <p className="text-sm font-semibold" style={{ color: '#111827' }}>{n.title}</p>
                     <p className="text-xs mt-0.5" style={{ color: '#6B7280' }}>{n.body}</p>
                     {n.deepLink && (
-                      <p className="text-xs mt-1 font-semibold" style={{ color: '#0033A0' }}>
-                        Tap to view →
+                      <p className="text-xs mt-1 font-semibold" style={{ color: style.color }}>
+                        {style.cta}
                       </p>
                     )}
                   </div>

@@ -33,29 +33,35 @@ export default function Navbar() {
   function navItems() {
     if (user!.role === Role.TEACHER) {
       return [
-        { label: 'Dashboard',   href: '/dashboard' },
-        { label: 'Diary',       href: '/diary' },
-        { label: 'Homework',    href: '/homework' },
-        { label: 'Hotspots',    href: '/hotspots' },
+        { label: 'Dashboard',     href: '/dashboard'     },
+        { label: 'Diary',         href: '/diary'         },
+        { label: 'Homework',      href: '/homework'      },
+        { label: 'Hotspots',      href: '/hotspots'      },
         { label: 'Interventions', href: '/interventions' },
+        { label: 'Curriculum',    href: '/curriculum'    },
+        { label: 'Messages',      href: '/messages'      },
       ];
     }
     if (user!.role === Role.HEADTEACHER || user!.role === Role.SCHOOLADMIN) {
       return [
-        { label: 'School',        href: '/school' },
+        { label: 'School',        href: '/school'        },
         { label: 'Interventions', href: '/interventions' },
+        { label: 'Curriculum',    href: '/curriculum'    },
+        { label: 'Messages',      href: '/messages'      },
       ];
     }
     if (user!.role === Role.DISTRICT) {
       return [
-        { label: 'District', href: '/district' },
-        { label: 'Reports',  href: '/reports'  },
+        { label: 'District',   href: '/district'   },
+        { label: 'Curriculum', href: '/curriculum' },
+        { label: 'Reports',    href: '/reports'    },
       ];
     }
     if (user!.role === Role.MINISTRY) {
       return [
-        { label: 'Ministry', href: '/ministry' },
-        { label: 'Reports',  href: '/reports'  },
+        { label: 'Ministry',   href: '/ministry'   },
+        { label: 'Curriculum', href: '/curriculum' },
+        { label: 'Reports',    href: '/reports'    },
       ];
     }
     if (user!.role === Role.STUDENT) {
