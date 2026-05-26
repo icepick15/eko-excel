@@ -7,6 +7,7 @@ import { Role, ColorStatus, CORE_SUBJECTS } from '@/lib/types';
 import type { District, School, Student } from '@/lib/types';
 import { districtStore, schoolStore, studentStore, metricsStore, hotspotStore } from '@/lib/storage';
 import { getSchoolReadinessAvg, scoreColor, scoreBg, SCORE_GREEN, SCORE_YELLOW, getStateTrend, getDistrictTrend } from '@/lib/calculations';
+import { generateAlerts } from '@/lib/alerts';
 import TrendChart from '@/components/TrendChart';
 import Navbar from '@/components/Navbar';
 
@@ -35,6 +36,8 @@ export default function MinistryDashboard() {
     setDistricts(districtStore.getAll());
     setAllStudents(studentStore.getAll().filter((s) => s.isActive !== false));
     setAllSchools(schoolStore.getAll());
+
+    generateAlerts(user);
   }, [user, isLoading, router]);
 
   function getStudentAvg(studentId: string, subject?: string): number {

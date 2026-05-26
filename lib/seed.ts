@@ -323,6 +323,187 @@ export function seedData(): void {
   students.forEach((s) => recomputeStudent(s.id));
 }
 
+// ── Multi-school seed (schools 2–5) ───────────────────────────────────────────
+export function seedMultiSchool(): void {
+  if (typeof window === 'undefined') return;
+  if (localStorage.getItem('eko_seeded_multi_v1') === 'true') return;
+
+  // ── Performance profiles ────────────────────────────────────────────
+  // sch-2: high performer  (~72%)  dist-1 → green on ministry heatmap
+  // sch-3: medium          (~56%)  dist-2 → yellow
+  // sch-4: struggling      (~36%)  dist-3 → RED, triggers alerts
+  // sch-5: medium-low      (~52%)  dist-4 → yellow
+
+  type SchoolCfg = {
+    schoolId: string;
+    baseScore: number;   // mean classScore for diary entries
+    variance: number;    // ±spread
+    compliance: number;  // fraction of 3 sessions/week that get logged
+    teachers: { id: string; name: string; phone: string; subject: string }[];
+  };
+
+  const configs: SchoolCfg[] = [
+    {
+      schoolId: 'sch-2', baseScore: 73, variance: 10, compliance: 0.92,
+      teachers: [
+        { id: 'user-t-s2-1', name: 'Mr. Seun Adeyemi',   phone: '08061111001', subject: 'Mathematics'      },
+        { id: 'user-t-s2-2', name: 'Mrs. Titi Obaseki',  phone: '08061111002', subject: 'English Language' },
+      ],
+    },
+    {
+      schoolId: 'sch-3', baseScore: 56, variance: 12, compliance: 0.72,
+      teachers: [
+        { id: 'user-t-s3-1', name: 'Mr. Aliyu Garba',    phone: '08061111003', subject: 'Mathematics'      },
+        { id: 'user-t-s3-2', name: 'Mrs. Nneka Igwe',    phone: '08061111004', subject: 'Biology'          },
+      ],
+    },
+    {
+      schoolId: 'sch-4', baseScore: 36, variance: 10, compliance: 0.52,
+      teachers: [
+        { id: 'user-t-s4-1', name: 'Mr. Godwin Efe',     phone: '08061111005', subject: 'Chemistry'        },
+        { id: 'user-t-s4-2', name: 'Mrs. Shade Lemo',    phone: '08061111006', subject: 'English Language' },
+      ],
+    },
+    {
+      schoolId: 'sch-5', baseScore: 52, variance: 11, compliance: 0.80,
+      teachers: [
+        { id: 'user-t-s5-1', name: 'Mr. Emeka Okeke',    phone: '08061111007', subject: 'Physics'          },
+        { id: 'user-t-s5-2', name: 'Mrs. Amina Bello',   phone: '08061111008', subject: 'Mathematics'      },
+      ],
+    },
+  ];
+
+  // ── Name pools ────────────────────────────────────────────────────────
+  const maleFirst   = ['Adebayo','Chukwuma','Ismail','Tunde','Dele','Kola','Segun','Obinna','Hakeem','Femi','Dayo','Kunle'];
+  const femaleFirst = ['Adeola','Chinwe','Fatima','Bimpe','Remi','Sade','Ifeoma','Kemi','Amaka','Hauwa','Toyin','Ngozi'];
+  const surnames    = ['Adeyemi','Okafor','Bello','Lawal','Chukwu','Ibrahim','Eze','Afolabi','Nwosu','Salami','Ogundipe','Danjuma'];
+
+  // ── Topic pools per subject ───────────────────────────────────────────
+  const subjectTopics: Record<string, string[]> = {
+    'Mathematics':      ['topic-1', 'topic-2', 'topic-3'],
+    'English Language': ['topic-11', 'topic-12', 'topic-13'],
+    'Biology':          ['topic-24', 'topic-25', 'topic-26'],
+    'Chemistry':        ['topic-21', 'topic-22', 'topic-23'],
+    'Physics':          ['topic-17', 'topic-18', 'topic-19'],
+  };
+
+  const classLevels = ['JSS1', 'SSS1', 'SSS2', 'SSS3'] as const;
+  let stuIdx = 100; // stu-100 onward — no collision with sch-1's stu-1…stu-30
+
+  for (const cfg of configs) {
+    const { schoolId, baseScore, variance, compliance, teachers } = cfg;
+
+    // 1. Teachers
+    userStore.saveMany(teachers.map((t) => ({
+      id: t.id, phone: t.phone, name: t.name,
+      role: Role.TEACHER, schoolId,
+      createdAt: daysAgo(90), isActive: true,
+    })));
+
+    // 2. TCS — each teacher covers SSS1A and SSS2A in their subject
+    const teachingClasses = [`cls-${schoolId}-SSS1`, `cls-${schoolId}-SSS2`];
+    const newTcs: TeacherClassSubject[] = [];
+    for (const t of teachers) {
+      teachingClasses.forEach((cId, ci) => {
+        newTcs.push({ id: `tcs-${t.id}-${ci}`, teacherId: t.id, classId: cId, subject: t.subject });
+      });
+    }
+    tcsStore.saveMany(newTcs);
+
+    // 3. Timetable slots (Mon p1, Wed p2 per teacher/class pair) — needed for compliance calc
+    const ttSlots: TimetableSlot[] = [];
+    for (const tc of newTcs) {
+      ttSlots.push(
+        { id: `tt-${tc.id}-mon`, classId: tc.classId, teacherClassSubjectId: tc.id, dayOfWeek: 1, period: 1, startTime: '08:00', endTime: '09:00' },
+        { id: `tt-${tc.id}-wed`, classId: tc.classId, teacherClassSubjectId: tc.id, dayOfWeek: 3, period: 2, startTime: '09:00', endTime: '10:00' },
+        { id: `tt-${tc.id}-fri`, classId: tc.classId, teacherClassSubjectId: tc.id, dayOfWeek: 5, period: 1, startTime: '08:00', endTime: '09:00' },
+      );
+    }
+    timetableStore.saveMany(ttSlots);
+
+    // 4. Students — 5 per class level
+    const schoolStudents: Student[] = [];
+    for (const lvl of classLevels) {
+      const classId = `cls-${schoolId}-${lvl}`;
+      for (let i = 0; i < 5; i++) {
+        const isMale = (stuIdx + i) % 2 === 0;
+        const first  = isMale ? maleFirst[(stuIdx + i) % maleFirst.length] : femaleFirst[(stuIdx + i) % femaleFirst.length];
+        const last   = surnames[(stuIdx + i) % surnames.length];
+        const dobYear = lvl.startsWith('JSS') ? 2011 + Math.floor(i / 2) : 2008 + Math.floor(i / 2);
+        const dobMon  = String(((stuIdx + i) % 12) + 1).padStart(2, '0');
+        schoolStudents.push({
+          id: `stu-${stuIdx + i}`,
+          name: `${first} ${last}`,
+          gender: isMale ? 'M' : 'F',
+          classId, schoolId,
+          dob: `${dobYear}-${dobMon}-15`,
+          enrolledDate: daysAgo(300),
+          consentSigned: true,
+          isActive: true,
+        });
+      }
+      stuIdx += 5;
+    }
+    studentStore.saveMany(schoolStudents);
+
+    // 5. Diary entries — 8 weeks, up to 3 sessions/week (compliance-gated)
+    const diaries: DiaryEntry[] = [];
+    for (const tc of newTcs) {
+      const clsStudents = schoolStudents.filter((s) => s.classId === tc.classId);
+      if (clsStudents.length === 0) continue;
+      const topics = subjectTopics[tc.subject] ?? ['topic-1'];
+
+      for (let week = 0; week < 8; week++) {
+        for (let day = 0; day < 3; day++) {
+          // Skip some sessions based on compliance (creates realistic gaps)
+          if (day > 0 && Math.random() > compliance) continue;
+
+          const daysOffset  = week * 7 + day * 2 + 1;
+          const topicId     = topics[(week * 3 + day) % topics.length];
+          const classScore  = Math.min(100, Math.max(15, baseScore + (Math.random() * variance * 2 - variance)));
+          const traitBase   = baseScore >= 70 ? 3 : 2;
+
+          const present = clsStudents.filter(() => Math.random() > 0.1);
+          const absent  = clsStudents.filter((s) => !present.find((p) => p.id === s.id));
+
+          diaries.push({
+            id:       `d-${tc.teacherId.slice(-4)}-w${week}-d${day}-${tc.classId.slice(-4)}`,
+            teacherId: tc.teacherId,
+            classId:   tc.classId,
+            subject:   tc.subject,
+            topicIds:  [topicId],
+            classScore: Math.round(classScore),
+            presentStudentIds: present.map((s) => s.id),
+            absentStudentIds:  absent.map((s) => s.id),
+            traits: {
+              [BehavioralTrait.ENGAGEMENT]:    Math.min(5, Math.max(1, traitBase + Math.round(Math.random() * 2 - 0.5))),
+              [BehavioralTrait.PERSISTENCE]:   Math.min(5, Math.max(1, traitBase + Math.round(Math.random() * 2 - 0.5))),
+              [BehavioralTrait.FOCUS]:         Math.min(5, Math.max(1, traitBase + Math.round(Math.random() * 2 - 0.5))),
+              [BehavioralTrait.COLLABORATION]: Math.min(5, Math.max(1, traitBase + Math.round(Math.random() * 2 - 0.5))),
+              [BehavioralTrait.RESILIENCE]:    Math.min(5, Math.max(1, traitBase + Math.round(Math.random() * 2 - 0.5))),
+            },
+            submittedAt: new Date(Date.now() - daysOffset * 86400000).toISOString(),
+            syncStatus: 'synced',
+          });
+        }
+      }
+    }
+    diaries.forEach((d) => diaryStore.save(d));
+
+    // 6. Compute readiness metrics for every new student
+    schoolStudents.forEach((s) => recomputeStudent(s.id));
+  }
+
+  // ── Extra district users for dist-3, dist-4, dist-5 ─────────────────
+  userStore.saveMany([
+    { id: 'user-dist-3', phone: '08045678903', name: 'Mrs. Ngozi Okoye',   role: Role.DISTRICT, districtId: 'dist-3', createdAt: daysAgo(150), isActive: true },
+    { id: 'user-dist-4', phone: '08045678904', name: 'Mr. Seun Adeola',    role: Role.DISTRICT, districtId: 'dist-4', createdAt: daysAgo(150), isActive: true },
+    { id: 'user-dist-5', phone: '08045678905', name: 'Dr. Bisi Akinwande', role: Role.DISTRICT, districtId: 'dist-5', createdAt: daysAgo(150), isActive: true },
+  ]);
+
+  localStorage.setItem('eko_seeded_multi_v1', 'true');
+}
+
 // ── Question Bank ─────────────────────────────────────────────────────
 export function seedQuestions(): void {
   if (typeof window === 'undefined') return;

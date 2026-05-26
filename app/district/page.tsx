@@ -10,6 +10,7 @@ import {
   districtStore, classStore, userStore,
 } from '@/lib/storage';
 import { getSchoolReadinessAvg, getTeacherComplianceThisWeek, getColorStatus, scoreColor, SCORE_GREEN, SCORE_YELLOW, getDistrictTrend, getSchoolTrend } from '@/lib/calculations';
+import { generateAlerts } from '@/lib/alerts';
 import TrendChart from '@/components/TrendChart';
 import Navbar from '@/components/Navbar';
 
@@ -41,6 +42,8 @@ function DistrictContent() {
 
     setSchools(schoolStore.getByDistrict(viewDistrictId));
     setAllStudents(studentStore.getByDistrict(viewDistrictId));
+
+    if (user.role === Role.DISTRICT) generateAlerts(user);
   }, [user, isLoading, router, viewDistrictId, paramId]);
 
   function getStudentAvg(studentId: string, subject?: string): number {

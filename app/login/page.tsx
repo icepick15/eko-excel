@@ -8,12 +8,13 @@ import { Role } from '@/lib/types';
 
 
 const DEMO_ACCOUNTS = [
-  { phone: '08012345678', name: 'Mrs. Adaeze Okonkwo', role: 'Teacher' },
-  { phone: '08034567890', name: 'Mr. Emmanuel Chukwu', role: 'Head Teacher' },
-  { phone: '08045678901', name: 'Dr. Fatima Sule', role: 'District Officer' },
-  { phone: '08056789012', name: 'Hon. Gbenga Adewale', role: 'Ministry Official' },
-  { phone: '08067890123', name: 'Abiodun Fashola', role: 'Student (SS1)' },
-  { phone: '08089012345', name: 'Mr. Taiwo Fashola', role: 'Parent' },
+  { phone: '08012345678', name: 'Mrs. Adaeze Okonkwo',  role: 'Teacher',           highlight: false },
+  { phone: '08034567890', name: 'Mr. Emmanuel Chukwu',  role: 'Head Teacher',       highlight: false },
+  { phone: '08045678901', name: 'Dr. Fatima Sule',       role: 'District I Officer', highlight: false },
+  { phone: '08045678903', name: 'Mrs. Ngozi Okoye',      role: 'District III Officer',highlight: false },
+  { phone: '08056789012', name: 'Hon. Gbenga Adewale',   role: 'Ministry Official',  highlight: true  },
+  { phone: '08067890123', name: 'Abiodun Fashola',       role: 'Student (SS1)',      highlight: false },
+  { phone: '08089012345', name: 'Mr. Taiwo Fashola',     role: 'Parent',             highlight: false },
 ];
 
 export default function LoginPage() {

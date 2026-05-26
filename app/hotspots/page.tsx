@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { Role } from '@/lib/types';
-import type { Hotspot, Student, Class } from '@/lib/types';
-import { hotspotStore, studentStore, classStore, tcsStore, interventionStore } from '@/lib/storage';
+import type { Hotspot, Student, Class, User } from '@/lib/types';
+import { hotspotStore, studentStore, classStore, tcsStore, interventionStore, userStore } from '@/lib/storage';
 import Navbar from '@/components/Navbar';
 
 function uid(): string {
@@ -33,8 +33,14 @@ export default function HotspotsPage() {
   const [classMap, setClassMap]   = useState<Record<string, Class>>({});
   const [sortBy, setSortBy]       = useState<SortBy>('severity');
   const [filterSubject, setFilterSubject] = useState('');
-  const [resolving, setResolving] = useState<string | null>(null);
-  const [assigning, setAssigning] = useState<Hotspot | null>(null);
+  const [resolving,      setResolving]      = useState<string | null>(null);
+  const [assigning,      setAssigning]      = useState<Hotspot | null>(null);
+  const [schoolTeachers, setSchoolTeachers] = useState<User[]>([]);
+  const [assignForm, setAssignForm] = useState({
+    assignedTo:  '',
+    description: '',
+    dueDate:     new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
+  });
 
   function load() {
     if (!user) return;
@@ -72,6 +78,17 @@ export default function HotspotsPage() {
     setHotspots(all);
   }
 
+  function openAssignForm(hotspot: Hotspot) {
+    setAssigning(hotspot);
+    const student = studentMap[hotspot.studentId];
+    setAssignForm({
+      assignedTo:  user?.id ?? '',
+      description: `Remedial support for ${hotspot.subject} — readiness at ${Math.round(hotspot.readinessScore)}%`,
+      dueDate:     new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
+    });
+    setSchoolTeachers(userStore.getTeachers(student?.schoolId ?? user?.schoolId ?? ''));
+  }
+
   useEffect(() => {
     if (isLoading) return;
     if (!user) { router.replace('/login'); return; }
@@ -98,23 +115,22 @@ export default function HotspotsPage() {
     setResolving(null);
   }
 
-  function handleAssign(hotspot: Hotspot) {
-    if (!user) return;
-    const student = studentMap[hotspot.studentId];
+  function handleAssignSubmit() {
+    if (!user || !assigning || !assignForm.assignedTo || !assignForm.description) return;
+    const student = studentMap[assigning.studentId];
     interventionStore.save({
-      id: uid(),
-      hotspotId: hotspot.id,
-      studentId: hotspot.studentId,
-      schoolId: student?.schoolId,
-      assignedBy: user.id,
-      assignedTo: user.id,
-      description: `Intervention for ${hotspot.subject} — readiness at ${(hotspot.readinessScore ?? 0).toFixed(0)}%`,
-      dueDate: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
-      status: 'open',
-      createdAt: new Date().toISOString(),
+      id:          uid(),
+      hotspotId:   assigning.id,
+      studentId:   assigning.studentId,
+      schoolId:    student?.schoolId ?? user.schoolId,
+      assignedBy:  user.id,
+      assignedTo:  assignForm.assignedTo,
+      description: assignForm.description,
+      dueDate:     assignForm.dueDate,
+      status:      'open',
+      createdAt:   new Date().toISOString(),
     });
     setAssigning(null);
-    alert('Intervention logged!');
   }
 
   if (isLoading) return null;
@@ -241,7 +257,7 @@ export default function HotspotsPage() {
                       View Profile →
                     </button>
                     <button
-                      onClick={() => handleAssign(h)}
+                      onClick={() => openAssignForm(h)}
                       className="flex-1 py-2 rounded-xl text-xs font-bold"
                       style={{ background: '#FFF7ED', color: '#EA580C', border: '1.5px solid #FDBA74' }}
                     >
@@ -296,6 +312,76 @@ export default function HotspotsPage() {
           </div>
         )}
       </main>
+
+      {/* Log Intervention modal — bottom sheet */}
+      {assigning && (
+        <div
+          className="fixed inset-0 flex items-end justify-center z-50"
+          style={{ background: 'rgba(0,0,0,0.4)' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setAssigning(null); }}
+        >
+          <div className="w-full max-w-lg rounded-t-3xl p-6" style={{ background: 'white', maxHeight: '90vh', overflowY: 'auto' }}>
+            <div className="mb-4">
+              <h2 className="font-black text-lg" style={{ color: '#0033A0' }}>Log Intervention</h2>
+              <p className="text-sm mt-1" style={{ color: '#6B7280' }}>
+                {studentMap[assigning.studentId]?.name} · {assigning.subject}
+              </p>
+            </div>
+
+            <label className="text-xs font-bold mb-1 block" style={{ color: '#374151' }}>Assign To</label>
+            <select
+              className="w-full rounded-xl px-3 py-2.5 text-sm mb-3"
+              style={{ border: '1.5px solid #E5E7EB' }}
+              value={assignForm.assignedTo}
+              onChange={(e) => setAssignForm({ ...assignForm, assignedTo: e.target.value })}
+            >
+              <option value="">Select teacher…</option>
+              {schoolTeachers.map((t) => (
+                <option key={t.id} value={t.id}>{t.name} ({t.role})</option>
+              ))}
+            </select>
+
+            <label className="text-xs font-bold mb-1 block" style={{ color: '#374151' }}>Action Description</label>
+            <textarea
+              className="w-full rounded-xl px-3 py-2.5 text-sm mb-3"
+              style={{ border: '1.5px solid #E5E7EB', resize: 'none' }}
+              rows={3}
+              value={assignForm.description}
+              onChange={(e) => setAssignForm({ ...assignForm, description: e.target.value })}
+            />
+
+            <label className="text-xs font-bold mb-1 block" style={{ color: '#374151' }}>Due Date</label>
+            <input
+              type="date"
+              className="w-full rounded-xl px-3 py-2.5 text-sm mb-5"
+              style={{ border: '1.5px solid #E5E7EB' }}
+              value={assignForm.dueDate}
+              onChange={(e) => setAssignForm({ ...assignForm, dueDate: e.target.value })}
+            />
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setAssigning(null)}
+                className="flex-1 py-3 rounded-xl text-sm font-bold"
+                style={{ background: '#F3F4F6', color: '#374151' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAssignSubmit}
+                disabled={!assignForm.assignedTo || !assignForm.description}
+                className="flex-1 py-3 rounded-xl text-sm font-bold"
+                style={{
+                  background: (!assignForm.assignedTo || !assignForm.description) ? '#E5E7EB' : '#EA580C',
+                  color:      (!assignForm.assignedTo || !assignForm.description) ? '#9CA3AF' : 'white',
+                }}
+              >
+                Log Intervention
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

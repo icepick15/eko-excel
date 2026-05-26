@@ -10,6 +10,7 @@ import {
   classStore, userStore, tcsStore, messageStore,
 } from '@/lib/storage';
 import { getTeacherComplianceThisWeek, getClassReadinessAvg, getSchoolReadinessAvg, scoreColor, SCORE_GREEN, SCORE_YELLOW, getSchoolTrend, getClassTrend } from '@/lib/calculations';
+import { generateAlerts } from '@/lib/alerts';
 import TrendChart from '@/components/TrendChart';
 import Navbar from '@/components/Navbar';
 
@@ -62,6 +63,9 @@ function SchoolContent() {
     setClasses(classStore.getBySchool(sId));
     setTeachers(userStore.getTeachers(sId));
     setSchoolAvg(getSchoolReadinessAvg(sId));
+
+    // Generate proactive alerts for school-level roles
+    if (!viewerRoles.includes(user.role)) generateAlerts(user);
   }, [user, isLoading, router, viewSchoolId, paramId]);
 
   if (isLoading) return null;

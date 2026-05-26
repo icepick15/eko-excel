@@ -8,9 +8,11 @@ import type { Student, DiaryEntry, TeacherClassSubject, Class, Notification, Mes
 import {
   studentStore, diaryStore, metricsStore, hotspotStore,
   tcsStore, classStore, timetableStore, notificationStore, messageStore,
-  schoolStore,
+  schoolStore, interventionStore,
 } from '@/lib/storage';
+import type { Intervention } from '@/lib/types';
 import { getTeacherComplianceThisWeek, SCORE_GREEN, SCORE_YELLOW } from '@/lib/calculations';
+import { generateAlerts } from '@/lib/alerts';
 import Navbar from '@/components/Navbar';
 
 function timeOfDay(): string {
@@ -36,7 +38,8 @@ export default function TeacherDashboard() {
   const [unreadMsgs, setUnreadMsgs]  = useState(0);
   const [unreadNotes, setUnreadNotes]= useState(0);
   const [compliance, setCompliance]  = useState({ submitted: 0, required: 0, rate: 0 });
-  const [hotspotCount, setHotspotCount] = useState(0);
+  const [hotspotCount,    setHotspotCount]    = useState(0);
+  const [myInterventions, setMyInterventions] = useState<Intervention[]>([]);
 
   // students in MY classes
   const [classStudents, setClassStudents] = useState<Record<string, Student[]>>({});
@@ -81,6 +84,15 @@ export default function TeacherDashboard() {
     const allMyStudentIds = classes.flatMap((c) => (byClass[c.id] ?? []).map((s) => s.id));
     const hCount = allMyStudentIds.reduce((acc, sid) => acc + hotspotStore.getByStudent(sid).length, 0);
     setHotspotCount(hCount);
+
+    // My assigned interventions (open + in_progress)
+    const myTasks = interventionStore.getByTeacher(user.id).filter(
+      (iv) => iv.status === 'open' || iv.status === 'in_progress'
+    );
+    setMyInterventions(myTasks);
+
+    // Generate proactive alerts
+    generateAlerts(user);
   }, [user, isLoading, router]);
 
   if (isLoading) return <LoadingScreen />;
@@ -284,6 +296,51 @@ export default function TeacherDashboard() {
           </Section>
         )}
 
+        {/* ── My Intervention Tasks ─────────────────────────────────── */}
+        {myInterventions.length > 0 && (
+          <Section title="My Tasks" action={{ label: 'All Tasks', href: '/interventions' }}>
+            <div className="flex flex-col gap-2">
+              {myInterventions.slice(0, 4).map((iv) => {
+                const today = new Date().toISOString().slice(0, 10);
+                const overdue = iv.dueDate < today;
+                const student = iv.studentId ? studentStore.getById(iv.studentId) : null;
+                return (
+                  <button
+                    key={iv.id}
+                    onClick={() => router.push('/interventions')}
+                    className="flex items-center gap-3 p-3 rounded-xl w-full text-left"
+                    style={{
+                      background: overdue ? '#FFF5F5' : '#F9FAFB',
+                      border: `1.5px solid ${overdue ? '#FECACA' : '#E5E7EB'}`,
+                    }}
+                  >
+                    <div
+                      className="w-9 h-9 rounded-xl flex items-center justify-center text-xs font-black shrink-0"
+                      style={{
+                        background: iv.status === 'in_progress' ? '#FFF7ED' : '#EFF6FF',
+                        color:      iv.status === 'in_progress' ? '#EA580C' : '#0033A0',
+                      }}
+                    >
+                      {iv.status === 'in_progress' ? '▶' : '○'}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm truncate" style={{ color: '#111827' }}>
+                        {student?.name ?? 'General'}
+                      </p>
+                      <p className="text-xs truncate" style={{ color: '#6B7280' }}>{iv.description}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-xs font-bold" style={{ color: overdue ? '#E30613' : '#9CA3AF' }}>
+                        {overdue ? 'Overdue' : `Due ${iv.dueDate.slice(5)}`}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </Section>
+        )}
+
         {/* ── Recent Diary Entries ──────────────────────────────────── */}
         <Section title="Recent Diary Entries" action={{ label: 'New Entry', href: '/diary' }}>
           {recentDiaries.length === 0 ? (
@@ -324,10 +381,11 @@ export default function TeacherDashboard() {
         </Section>
 
         {/* ── Quick Nav ──────────────────────────────────────────────── */}
-        <div className="grid grid-cols-3 gap-3 mt-5">
-          <QuickNav icon="✉️" label="Messages" badge={unreadMsgs} onClick={() => router.push('/messages')} />
-          <QuickNav icon="🔥" label="Hotspots" badge={hotspotCount} onClick={() => router.push('/hotspots')} />
-          <QuickNav icon="📊" label="School" badge={0} onClick={() => router.push('/school')} />
+        <div className="grid grid-cols-4 gap-3 mt-5">
+          <QuickNav icon="✉️" label="Messages"      badge={unreadMsgs}            onClick={() => router.push('/messages')} />
+          <QuickNav icon="🔥" label="Hotspots"      badge={hotspotCount}          onClick={() => router.push('/hotspots')} />
+          <QuickNav icon="📋" label="Tasks"         badge={myInterventions.length} onClick={() => router.push('/interventions')} />
+          <QuickNav icon="📊" label="School"        badge={0}                     onClick={() => router.push('/school')} />
         </div>
       </main>
     </div>

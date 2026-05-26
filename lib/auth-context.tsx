@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { User } from './types';
 import { auth } from './storage';
-import { seedData, seedQuestions } from './seed';
+import { seedData, seedQuestions, seedMultiSchool } from './seed';
 
 interface AuthContextValue {
   user: User | null;
@@ -21,6 +21,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     seedData();
     seedQuestions();
+    seedMultiSchool();
     const current = auth.current();
     setUser(current);
     setIsLoading(false);

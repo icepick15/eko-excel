@@ -47,10 +47,16 @@ export default function Navbar() {
       ];
     }
     if (user!.role === Role.DISTRICT) {
-      return [{ label: 'District', href: '/district' }];
+      return [
+        { label: 'District', href: '/district' },
+        { label: 'Reports',  href: '/reports'  },
+      ];
     }
     if (user!.role === Role.MINISTRY) {
-      return [{ label: 'Ministry', href: '/ministry' }];
+      return [
+        { label: 'Ministry', href: '/ministry' },
+        { label: 'Reports',  href: '/reports'  },
+      ];
     }
     if (user!.role === Role.STUDENT) {
       return [

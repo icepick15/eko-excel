@@ -4,243 +4,355 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { Role } from '@/lib/types';
-import type { Intervention } from '@/lib/types';
-import { interventionStore, studentStore, userStore } from '@/lib/storage';
+import type { Intervention, User, Student } from '@/lib/types';
+import { interventionStore, userStore, studentStore } from '@/lib/storage';
 import Navbar from '@/components/Navbar';
 
-type FilterStatus = 'all' | 'open' | 'in_progress' | 'completed';
+function uid(): string {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
 
-const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }> = {
-  open:        { bg: '#FEF9C3', color: '#854D0E', label: 'Open' },
-  in_progress: { bg: '#EFF6FF', color: '#0033A0', label: 'In Progress' },
-  completed:   { bg: '#DCFCE7', color: '#008751', label: 'Done' },
-};
+type StatusFilter = 'all' | 'open' | 'in_progress' | 'completed' | 'overdue';
+
+const STATUS_STYLES = {
+  open:        { bg: '#EFF6FF', color: '#0033A0', label: 'Open' },
+  in_progress: { bg: '#FFF7ED', color: '#EA580C', label: 'In Progress' },
+  completed:   { bg: '#F0FDF4', color: '#008751', label: 'Completed' },
+} as const;
 
 export default function InterventionsPage() {
   const { user, isLoading } = useAuth();
   const router = useRouter();
-  const [interventions, setInterventions] = useState<Intervention[]>([]);
-  const [filter, setFilter]               = useState<FilterStatus>('all');
-  const [showForm, setShowForm]           = useState(false);
 
-  // new intervention form
-  const [newStudentId, setNewStudentId] = useState('');
-  const [newDesc,      setNewDesc]      = useState('');
-  const [newDue,       setNewDue]       = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10);
+  const [interventions, setInterventions] = useState<Intervention[]>([]);
+  const [userMap,       setUserMap]       = useState<Record<string, User>>({});
+  const [studentMap,    setStudentMap]    = useState<Record<string, Student>>({});
+  const [teachers,      setTeachers]      = useState<User[]>([]);
+  const [allStudents,   setAllStudents]   = useState<Student[]>([]);
+  const [filterStatus,  setFilterStatus]  = useState<StatusFilter>('all');
+  const [showCreate,    setShowCreate]    = useState(false);
+  const [form, setForm] = useState({
+    studentId:   '',
+    assignedTo:  '',
+    description: '',
+    dueDate:     new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
   });
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  function isOverdue(iv: Intervention) {
+    return iv.status !== 'completed' && iv.dueDate < today;
+  }
+
+  function load() {
+    if (!user) return;
+
+    let all: Intervention[];
+    if (user.role === Role.TEACHER) {
+      all = interventionStore.getByTeacher(user.id);
+    } else if (user.role === Role.HEADTEACHER || user.role === Role.SCHOOLADMIN) {
+      all = interventionStore.getBySchool(user.schoolId ?? '');
+    } else {
+      all = interventionStore.getAll();
+    }
+
+    const uMap: Record<string, User> = {};
+    const sMap: Record<string, Student> = {};
+    for (const iv of all) {
+      for (const uid of [iv.assignedTo, iv.assignedBy]) {
+        if (uid && !uMap[uid]) { const u = userStore.getById(uid); if (u) uMap[uid] = u; }
+      }
+      if (iv.studentId && !sMap[iv.studentId]) {
+        const s = studentStore.getById(iv.studentId);
+        if (s) sMap[iv.studentId] = s;
+      }
+    }
+
+    setUserMap(uMap);
+    setStudentMap(sMap);
+    setInterventions(all.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+  }
 
   useEffect(() => {
     if (isLoading) return;
     if (!user) { router.replace('/login'); return; }
-    loadInterventions();
+
+    const sId = user.schoolId ?? '';
+    setTeachers(userStore.getTeachers(sId));
+    setAllStudents(studentStore.getBySchool(sId));
+    if (user.role === Role.TEACHER) {
+      setForm((f) => ({ ...f, assignedTo: user.id }));
+    }
+    load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, isLoading, router]);
 
-  function loadInterventions() {
-    if (!user) return;
-    if (user.role === Role.TEACHER) {
-      setInterventions(interventionStore.getByTeacher(user.id));
-    } else if (user.role === Role.HEADTEACHER || user.role === Role.SCHOOLADMIN) {
-      setInterventions(interventionStore.getBySchool(user.schoolId ?? ''));
-    } else {
-      setInterventions(interventionStore.getAll());
-    }
+  const filtered = interventions.filter((iv) => {
+    if (filterStatus === 'all') return true;
+    if (filterStatus === 'overdue') return isOverdue(iv);
+    return iv.status === filterStatus;
+  });
+
+  const stats = {
+    open:       interventions.filter((iv) => iv.status === 'open').length,
+    inProgress: interventions.filter((iv) => iv.status === 'in_progress').length,
+    completed:  interventions.filter((iv) => iv.status === 'completed').length,
+    overdue:    interventions.filter((iv) => isOverdue(iv)).length,
+  };
+
+  function handleStatusChange(iv: Intervention, newStatus: Intervention['status']) {
+    interventionStore.save({
+      ...iv,
+      status: newStatus,
+      ...(newStatus === 'completed' ? { completedAt: new Date().toISOString() } : {}),
+    });
+    load();
   }
 
-  function markComplete(id: string) {
-    interventionStore.complete(id);
-    loadInterventions();
+  function handleCreate() {
+    if (!user || !form.studentId || !form.assignedTo || !form.description || !form.dueDate) return;
+    const student = allStudents.find((s) => s.id === form.studentId);
+    interventionStore.save({
+      id:          uid(),
+      studentId:   form.studentId,
+      schoolId:    student?.schoolId ?? user.schoolId,
+      assignedBy:  user.id,
+      assignedTo:  form.assignedTo,
+      description: form.description,
+      dueDate:     form.dueDate,
+      status:      'open',
+      createdAt:   new Date().toISOString(),
+    });
+    setShowCreate(false);
+    setForm({
+      studentId:   '',
+      assignedTo:  user.role === Role.TEACHER ? user.id : '',
+      description: '',
+      dueDate:     new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
+    });
+    load();
   }
 
-  function markInProgress(id: string) {
-    const all = interventionStore.getAll();
-    const idx = all.findIndex((i) => i.id === id);
-    if (idx >= 0) {
-      all[idx].status = 'in_progress';
-      const updated = all[idx];
-      interventionStore.save(updated);
-      loadInterventions();
-    }
-  }
+  if (isLoading) return null;
 
-  function addIntervention() {
-    if (!user || !newDesc.trim()) return;
-    const iv: Intervention = {
-      id: `iv-${Date.now()}`,
-      studentId: newStudentId || undefined,
-      schoolId: user.schoolId,
-      assignedBy: user.id,
-      assignedTo: user.id,
-      description: newDesc.trim(),
-      dueDate: newDue,
-      status: 'open',
-      createdAt: new Date().toISOString(),
-    };
-    interventionStore.save(iv);
-    setNewDesc(''); setNewStudentId(''); setShowForm(false);
-    loadInterventions();
-  }
-
-  const myStudents = user?.schoolId
-    ? studentStore.getBySchool(user.schoolId)
-    : [];
-
-  const filtered = interventions.filter((i) => filter === 'all' || i.status === filter);
-  const openCnt  = interventions.filter((i) => i.status === 'open').length;
-  const inProgCnt = interventions.filter((i) => i.status === 'in_progress').length;
-
-  if (isLoading || !user) return null;
+  const canCreate = user?.role !== Role.DISTRICT && user?.role !== Role.MINISTRY;
 
   return (
     <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
       <Navbar />
       <main className="max-w-2xl mx-auto px-4 py-5 pb-10">
+
         {/* Header */}
         <div className="flex items-center justify-between mb-5">
           <div>
-            <p className="text-xs font-bold" style={{ color: '#9CA3AF' }}>Intervention Tracker</p>
+            <button onClick={() => router.back()} className="text-sm font-medium mb-1 block" style={{ color: '#0033A0' }}>←</button>
             <h1 className="text-xl font-black" style={{ color: '#0033A0' }}>Interventions</h1>
-            <p className="text-sm mt-0.5" style={{ color: '#6B7280' }}>
-              {openCnt} open · {inProgCnt} in progress
+            <p className="text-sm" style={{ color: '#6B7280' }}>
+              {user?.role === Role.TEACHER ? 'Tasks assigned to you' : 'School intervention log'}
             </p>
           </div>
-          <button
-            onClick={() => setShowForm(!showForm)}
-            className="px-4 py-2 rounded-xl text-sm font-bold text-white"
-            style={{ background: '#0033A0' }}
-          >
-            + New
-          </button>
+          {canCreate && (
+            <button
+              onClick={() => setShowCreate(true)}
+              className="px-4 py-2 rounded-xl text-sm font-bold"
+              style={{ background: '#0033A0', color: 'white' }}
+            >
+              + New
+            </button>
+          )}
         </div>
 
-        {/* New intervention form */}
-        {showForm && (
-          <div className="rounded-2xl p-4 mb-5" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
-            <h2 className="font-bold text-sm mb-3" style={{ color: '#0033A0' }}>Log New Intervention</h2>
-            <div className="flex flex-col gap-3">
-              <div>
-                <label className="text-xs font-semibold block mb-1" style={{ color: '#374151' }}>Student (optional)</label>
-                <select className="w-full rounded-xl px-3 py-2 text-sm" style={{ border: '1.5px solid #E5E7EB' }}
-                  value={newStudentId} onChange={(e) => setNewStudentId(e.target.value)}>
-                  <option value="">General / No specific student</option>
-                  {myStudents.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-semibold block mb-1" style={{ color: '#374151' }}>Description</label>
-                <textarea
-                  className="w-full rounded-xl px-3 py-2 text-sm resize-none"
-                  style={{ border: '1.5px solid #E5E7EB' }}
-                  rows={3}
-                  placeholder="Describe the intervention plan…"
-                  value={newDesc}
-                  onChange={(e) => setNewDesc(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="text-xs font-semibold block mb-1" style={{ color: '#374151' }}>Due Date</label>
-                <input type="date" className="w-full rounded-xl px-3 py-2 text-sm" style={{ border: '1.5px solid #E5E7EB' }}
-                  value={newDue} onChange={(e) => setNewDue(e.target.value)} />
-              </div>
-              <button onClick={addIntervention} disabled={!newDesc.trim()}
-                className="py-3 rounded-xl font-bold text-sm text-white"
-                style={{ background: newDesc.trim() ? '#008751' : '#D1D5DB' }}>
-                Save Intervention
+        {/* Stats row — tappable status filters */}
+        <div className="grid grid-cols-4 gap-3 mb-5">
+          {([
+            { label: 'Open',        value: stats.open,       color: '#0033A0', filter: 'open'        },
+            { label: 'In Progress', value: stats.inProgress, color: '#EA580C', filter: 'in_progress' },
+            { label: 'Completed',   value: stats.completed,  color: '#008751', filter: 'completed'   },
+            { label: 'Overdue',     value: stats.overdue,    color: '#E30613', filter: 'overdue'     },
+          ] as { label: string; value: number; color: string; filter: StatusFilter }[]).map(({ label, value, color, filter }) => {
+            const active = filterStatus === filter;
+            return (
+              <button
+                key={filter}
+                onClick={() => setFilterStatus(active ? 'all' : filter)}
+                className="rounded-2xl p-3 text-center"
+                style={{
+                  background: active ? color : 'white',
+                  border: `1.5px solid ${active ? color : '#E5E7EB'}`,
+                }}
+              >
+                <p className="text-xl font-black leading-none" style={{ color: active ? 'white' : color }}>{value}</p>
+                <p className="text-xs mt-1 leading-tight" style={{ color: active ? 'rgba(255,255,255,0.8)' : '#9CA3AF' }}>{label}</p>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Intervention list */}
+        {filtered.length === 0 ? (
+          <div className="text-center py-16 rounded-2xl" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
+            <p className="text-4xl mb-3">✅</p>
+            <p className="font-semibold" style={{ color: '#374151' }}>
+              No interventions{filterStatus !== 'all' ? ` (${filterStatus.replace('_', ' ')})` : ''}
+            </p>
+            {filterStatus === 'all' && canCreate && (
+              <p className="text-sm mt-1" style={{ color: '#9CA3AF' }}>Log one from a hotspot or tap + New above</p>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {filtered.map((iv) => {
+              const student  = studentMap[iv.studentId ?? ''];
+              const assignee = userMap[iv.assignedTo];
+              const assigner = userMap[iv.assignedBy];
+              const overdue  = isOverdue(iv);
+              const st       = STATUS_STYLES[iv.status];
+              const isMyTask = iv.assignedTo === user?.id;
+              const canAct   = isMyTask || user?.role === Role.HEADTEACHER || user?.role === Role.SCHOOLADMIN;
+
+              return (
+                <div
+                  key={iv.id}
+                  className="rounded-2xl p-4"
+                  style={{ background: 'white', border: `1.5px solid ${overdue ? '#FECACA' : '#E5E7EB'}` }}
+                >
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    {student ? (
+                      <button
+                        onClick={() => router.push(`/students/${student.id}`)}
+                        className="font-bold text-sm hover:underline"
+                        style={{ color: '#111827' }}
+                      >
+                        {student.name}
+                      </button>
+                    ) : (
+                      <span className="font-bold text-sm" style={{ color: '#111827' }}>General</span>
+                    )}
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: st.bg, color: st.color }}>
+                      {st.label}
+                    </span>
+                    {overdue && (
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: '#FEE2E2', color: '#E30613' }}>
+                        Overdue
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-sm mb-2" style={{ color: '#374151' }}>{iv.description}</p>
+
+                  <div className="flex items-center gap-3 text-xs flex-wrap" style={{ color: '#9CA3AF' }}>
+                    <span>→ {assignee?.name ?? 'Unknown'}</span>
+                    <span>Due {iv.dueDate}</span>
+                    {assigner && assigner.id !== iv.assignedTo && (
+                      <span>by {assigner.name}</span>
+                    )}
+                    {iv.completedAt && (
+                      <span>
+                        completed {new Date(iv.completedAt).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}
+                      </span>
+                    )}
+                  </div>
+
+                  {canAct && iv.status !== 'completed' && (
+                    <div className="flex gap-2 mt-3">
+                      {iv.status === 'open' && (
+                        <button
+                          onClick={() => handleStatusChange(iv, 'in_progress')}
+                          className="flex-1 py-2 rounded-xl text-xs font-bold"
+                          style={{ background: '#FFF7ED', color: '#EA580C', border: '1.5px solid #FDBA74' }}
+                        >
+                          Start →
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleStatusChange(iv, 'completed')}
+                        className="flex-1 py-2 rounded-xl text-xs font-bold"
+                        style={{ background: '#F0FDF4', color: '#008751', border: '1.5px solid #86EFAC' }}
+                      >
+                        Mark Complete ✓
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </main>
+
+      {/* Create modal — bottom sheet */}
+      {showCreate && (
+        <div
+          className="fixed inset-0 flex items-end justify-center z-50"
+          style={{ background: 'rgba(0,0,0,0.4)' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowCreate(false); }}
+        >
+          <div className="w-full max-w-lg rounded-t-3xl p-6" style={{ background: 'white', maxHeight: '90vh', overflowY: 'auto' }}>
+            <h2 className="font-black text-lg mb-4" style={{ color: '#0033A0' }}>Log Intervention</h2>
+
+            <label className="text-xs font-bold mb-1 block" style={{ color: '#374151' }}>Student</label>
+            <select
+              className="w-full rounded-xl px-3 py-2.5 text-sm mb-3"
+              style={{ border: '1.5px solid #E5E7EB' }}
+              value={form.studentId}
+              onChange={(e) => setForm({ ...form, studentId: e.target.value })}
+            >
+              <option value="">Select student…</option>
+              {allStudents.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+
+            <label className="text-xs font-bold mb-1 block" style={{ color: '#374151' }}>Assign To</label>
+            <select
+              className="w-full rounded-xl px-3 py-2.5 text-sm mb-3"
+              style={{ border: '1.5px solid #E5E7EB' }}
+              value={form.assignedTo}
+              onChange={(e) => setForm({ ...form, assignedTo: e.target.value })}
+            >
+              <option value="">Select teacher…</option>
+              {teachers.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.role})</option>)}
+            </select>
+
+            <label className="text-xs font-bold mb-1 block" style={{ color: '#374151' }}>Action Description</label>
+            <textarea
+              className="w-full rounded-xl px-3 py-2.5 text-sm mb-3"
+              style={{ border: '1.5px solid #E5E7EB', resize: 'none' }}
+              rows={3}
+              placeholder="What remedial action should be taken?"
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+            />
+
+            <label className="text-xs font-bold mb-1 block" style={{ color: '#374151' }}>Due Date</label>
+            <input
+              type="date"
+              className="w-full rounded-xl px-3 py-2.5 text-sm mb-5"
+              style={{ border: '1.5px solid #E5E7EB' }}
+              value={form.dueDate}
+              min={today}
+              onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
+            />
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowCreate(false)}
+                className="flex-1 py-3 rounded-xl text-sm font-bold"
+                style={{ background: '#F3F4F6', color: '#374151' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreate}
+                disabled={!form.studentId || !form.assignedTo || !form.description}
+                className="flex-1 py-3 rounded-xl text-sm font-bold"
+                style={{
+                  background: (!form.studentId || !form.assignedTo || !form.description) ? '#E5E7EB' : '#0033A0',
+                  color:      (!form.studentId || !form.assignedTo || !form.description) ? '#9CA3AF' : 'white',
+                }}
+              >
+                Log Intervention
               </button>
             </div>
           </div>
-        )}
-
-        {/* Filter tabs */}
-        <div className="flex gap-1 mb-4 p-1 rounded-xl" style={{ background: '#E5E7EB' }}>
-          {(['all', 'open', 'in_progress', 'completed'] as FilterStatus[]).map((f) => (
-            <button key={f} onClick={() => setFilter(f)}
-              className="flex-1 py-1.5 rounded-lg text-xs font-semibold"
-              style={{ background: filter === f ? 'white' : 'transparent', color: filter === f ? '#0033A0' : '#6B7280' }}>
-              {f === 'all' ? 'All' : f === 'in_progress' ? 'In Progress' : f.charAt(0).toUpperCase() + f.slice(1)}
-            </button>
-          ))}
-        </div>
-
-        {/* List */}
-        <div className="flex flex-col gap-3">
-          {filtered.length === 0 ? (
-            <p className="text-sm text-center py-8" style={{ color: '#9CA3AF' }}>
-              {filter === 'all' ? 'No interventions yet. Log one above.' : `No ${filter} interventions.`}
-            </p>
-          ) : (
-            filtered.map((iv) => <InterventionCard key={iv.id} iv={iv}
-              onComplete={() => markComplete(iv.id)}
-              onInProgress={() => markInProgress(iv.id)}
-            />)
-          )}
-        </div>
-      </main>
-    </div>
-  );
-}
-
-function InterventionCard({
-  iv, onComplete, onInProgress,
-}: {
-  iv: Intervention;
-  onComplete: () => void;
-  onInProgress: () => void;
-}) {
-  const student  = iv.studentId ? studentStore.getById(iv.studentId) : null;
-  const assignee = userStore.getById(iv.assignedTo);
-  const style    = STATUS_STYLE[iv.status];
-  const daysLeft = Math.ceil((new Date(iv.dueDate).getTime() - Date.now()) / 86400000);
-  const overdue  = daysLeft < 0 && iv.status !== 'completed';
-
-  return (
-    <div className="rounded-2xl p-4" style={{ background: 'white', border: `1.5px solid ${overdue ? '#FCA5A5' : '#E5E7EB'}` }}>
-      <div className="flex items-start gap-3">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: style.bg, color: style.color }}>
-              {style.label}
-            </span>
-            {overdue && (
-              <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: '#FEE2E2', color: '#E30613' }}>
-                Overdue
-              </span>
-            )}
-          </div>
-          <p className="text-sm font-semibold" style={{ color: '#111827' }}>
-            {student ? student.name : 'General Intervention'}
-          </p>
-          <p className="text-xs mt-1" style={{ color: '#6B7280' }}>{iv.description}</p>
-          <p className="text-xs mt-2" style={{ color: '#9CA3AF' }}>
-            Due {new Date(iv.dueDate).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}
-            {assignee && ` · ${assignee.name}`}
-            {iv.completedAt && ` · Completed ${new Date(iv.completedAt).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}`}
-          </p>
-        </div>
-      </div>
-
-      {/* Action buttons */}
-      {iv.status !== 'completed' && (
-        <div className="flex gap-2 mt-3">
-          {iv.status === 'open' && (
-            <button onClick={onInProgress}
-              className="flex-1 py-2 rounded-xl text-xs font-bold"
-              style={{ background: '#EFF6FF', color: '#0033A0', border: '1.5px solid #BFDBFE' }}>
-              Start →
-            </button>
-          )}
-          <button onClick={onComplete}
-            className="flex-1 py-2 rounded-xl text-xs font-bold"
-            style={{ background: '#DCFCE7', color: '#008751', border: '1.5px solid #86EFAC' }}>
-            Mark Done ✓
-          </button>
-          {student && (
-            <button onClick={() => window.location.href = `/students/${student.id}`}
-              className="flex-1 py-2 rounded-xl text-xs font-bold"
-              style={{ background: '#F9FAFB', color: '#374151', border: '1.5px solid #E5E7EB' }}>
-              View Profile
-            </button>
-          )}
         </div>
       )}
     </div>

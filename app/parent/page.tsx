@@ -11,6 +11,7 @@ import {
 } from '@/lib/storage';
 import { scoreColor, SCORE_GREEN, SCORE_YELLOW } from '@/lib/calculations';
 import Navbar from '@/components/Navbar';
+import { generateAlerts } from '@/lib/alerts';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -56,6 +57,7 @@ export default function ParentDashboard() {
     const kids = ids.map((id) => studentStore.getById(id)).filter(Boolean) as Student[];
     setChildren(kids);
     setMessages(messageStore.getForUser(user.id));
+    generateAlerts(user);
   }, [user, isLoading, router]);
 
   if (isLoading) {
