@@ -74,7 +74,13 @@ function SchoolContent() {
   const schoolId = viewSchoolId;
   const atRisk  = students.filter((s) => metricsStore.getByStudent(s.id).some((m) => m.colorStatus === ColorStatus.RED)).length;
   const onTrack = students.filter((s) => metricsStore.getByStudent(s.id).every((m) => m.colorStatus !== ColorStatus.RED)).length;
-  const hotspotCount = hotspotStore.getBySchool(schoolId).length;
+  const schoolHotspots = hotspotStore.getBySchool(schoolId);
+  const hotspotCount = schoolHotspots.length;
+  // Worst hotspot per student — five distinct students for the overview card
+  const topHotspots = [...schoolHotspots]
+    .sort((a, b) => a.readinessScore - b.readinessScore)
+    .filter((h, i, arr) => arr.findIndex((x) => x.studentId === h.studentId) === i)
+    .slice(0, 5);
 
   // Teacher compliance
   const teacherStats = teachers.map((t) => ({
@@ -213,13 +219,13 @@ function SchoolContent() {
               <span className="text-lg" style={{ color: '#0033A0' }}>→</span>
             </button>
 
-            {hotspotStore.getBySchool(schoolId).slice(0, 5).length > 0 && (
+            {topHotspots.length > 0 && (
               <div className="rounded-2xl p-4 mb-4" style={{ background: 'white', border: '1.5px solid #FECACA' }}>
                 <h3 className="font-bold text-sm mb-3" style={{ color: '#E30613' }}>
                   Active Hotspots ({hotspotCount})
                 </h3>
                 <div className="flex flex-col gap-2">
-                  {hotspotStore.getBySchool(schoolId).slice(0, 5).map((h) => {
+                  {topHotspots.map((h) => {
                     const stu = studentStore.getById(h.studentId);
                     const cls = stu ? classStore.getById(stu.classId) : null;
                     return (

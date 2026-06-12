@@ -46,13 +46,13 @@ export default function HotspotsPage() {
     if (!user) return;
 
     let myStudentIds: Set<string>;
-    if (user.role === Role.TEACHER || user.role === Role.HEADTEACHER) {
+    if (user.role === Role.TEACHER) {
       const tcs = tcsStore.getByTeacher(user.id);
       const classIds = [...new Set(tcs.map((t) => t.classId))];
       const studs = classIds.flatMap((cId) => studentStore.getByClass(cId));
       myStudentIds = new Set(studs.map((s) => s.id));
     } else {
-      // School admin or other school role
+      // Headteacher, school admin or other school role — school-wide view
       const studs = studentStore.getBySchool(user.schoolId ?? '');
       myStudentIds = new Set(studs.map((s) => s.id));
     }
@@ -186,7 +186,7 @@ export default function HotspotsPage() {
           <div className="text-center py-16 rounded-2xl" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
             <p className="text-4xl mb-3">✅</p>
             <p className="font-semibold" style={{ color: '#374151' }}>No active hotspots</p>
-            <p className="text-sm mt-1" style={{ color: '#9CA3AF' }}>All students are above the 70% readiness threshold</p>
+            <p className="text-sm mt-1" style={{ color: '#9CA3AF' }}>All students are above the 55% readiness threshold</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start mb-6">

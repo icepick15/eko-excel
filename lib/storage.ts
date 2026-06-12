@@ -40,8 +40,11 @@ const K = {
   academicHistory:    'eko_academic_history',
   handwrittenSubs:    'eko_handwritten_subs',
   currentUser:        'eko_current_user',
-  seeded:             'eko_seeded_v4',
+  seeded:             'eko_seeded_v5',
 } as const;
+
+// Flags written by older seed versions — removed on reset so everything re-seeds
+const LEGACY_KEYS = ['eko_seeded_v4', 'eko_seeded_multi_v1', 'eko_questions_v2'];
 
 // ============= Generic helpers =============
 function get<T>(key: string): T[] {
@@ -506,5 +509,12 @@ export const seedStore = {
   reset:      () => {
     if (typeof window === 'undefined') return;
     Object.values(K).forEach((k) => localStorage.removeItem(k));
+    LEGACY_KEYS.forEach((k) => localStorage.removeItem(k));
+  },
+  // Wipe all data (keeping the logged-in session) so a new seed version starts clean
+  resetData:  () => {
+    if (typeof window === 'undefined') return;
+    Object.values(K).forEach((k) => { if (k !== K.currentUser) localStorage.removeItem(k); });
+    LEGACY_KEYS.forEach((k) => localStorage.removeItem(k));
   },
 };

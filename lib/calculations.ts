@@ -273,6 +273,8 @@ function generateHomeAction(profiles: string[]): string {
 // Creates a hotspot for each subject where readiness < 55%.
 // Uses deterministic IDs (studentId + subject) so re-runs are idempotent.
 // Clears any stale/corrupt hotspots first.
+export const HOTSPOT_THRESHOLD = 55;
+
 export function detectHotspots(studentId: string): Hotspot[] {
   // Wipe stale open hotspots (includes corrupt entries from old seeds)
   hotspotStore.resetForStudent(studentId);
@@ -284,7 +286,7 @@ export function detectHotspots(studentId: string): Hotspot[] {
       ?? calculateReadiness(studentId, subject);
 
     // Only create a hotspot if score is meaningfully low (> 0 ensures we have real data)
-    if (metric.readinessScore > 0 && metric.readinessScore < SCORE_GREEN) {
+    if (metric.readinessScore > 0 && metric.readinessScore < HOTSPOT_THRESHOLD) {
       const hotspot: Hotspot = {
         id: `hs-${studentId}-${subject.replace(/\s+/g, '-')}`,
         studentId,

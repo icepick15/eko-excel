@@ -1,14 +1,15 @@
-import { Role, BehavioralTrait } from './types';
+import { Role, BehavioralTrait, CORE_SUBJECTS } from './types';
 import type {
   User, District, School, Class, TeacherClassSubject, TimetableSlot,
-  Student, TopicSegment, DiaryEntry, StudentAttendance, ReadinessSnapshot,
-  QuizQuestion, TermCalendar, Message, HomeworkAssignment,
+  Student, TopicSegment, DiaryEntry, StudentAttendance,
+  QuizQuestion, TermCalendar, Message, HomeworkAssignment, HomeworkSubmission,
+  QuizAttempt, Hotspot,
 } from './types';
 import {
   districtStore, schoolStore, classStore, tcsStore, timetableStore,
   studentStore, userStore, topicStore, diaryStore, attendanceStore,
-  snapshotStore, quizQuestionStore, termCalendarStore, messageStore, seedStore,
-  homeworkStore,
+  quizQuestionStore, termCalendarStore, messageStore, seedStore,
+  homeworkStore, homeworkSubStore, quizAttemptStore, interventionStore, hotspotStore,
 } from './storage';
 import { recomputeStudent } from './calculations';
 
@@ -29,6 +30,10 @@ function dateStr(daysOffset: number): string {
 export function seedData(): void {
   if (typeof window === 'undefined') return;
   if (seedStore.isSeeded()) return;
+
+  // New seed version: wipe data left behind by older seed versions so corrupt
+  // records (e.g. hotspots without scores) can't survive into this one
+  seedStore.resetData();
 
   // ── Districts ──────────────────────────────────────────────────────
   const districts: District[] = [
@@ -73,6 +78,8 @@ export function seedData(): void {
     { id: 'user-teacher-1', phone: '08012345678', name: 'Mrs. Folasade Adebayo',    role: Role.TEACHER,      schoolId: 'sch-1', createdAt: daysAgo(90),  isActive: true },
     { id: 'user-teacher-2', phone: '08023456789', name: 'Mr. Babatunde Alli',     role: Role.TEACHER,      schoolId: 'sch-1', createdAt: daysAgo(90),  isActive: true },
     { id: 'user-teacher-3', phone: '08098765432', name: 'Mrs. Ngozi Eze',         role: Role.TEACHER,      schoolId: 'sch-1', createdAt: daysAgo(80),  isActive: true },
+    { id: 'user-teacher-4', phone: '08011112222', name: 'Mr. Chinedu Okoro',      role: Role.TEACHER,      schoolId: 'sch-1', createdAt: daysAgo(85),  isActive: true },
+    { id: 'user-teacher-5', phone: '08011113333', name: 'Mrs. Yetunde Salami',    role: Role.TEACHER,      schoolId: 'sch-1', createdAt: daysAgo(85),  isActive: true },
     { id: 'user-head-1',    phone: '08034567890', name: 'Mr. Olusegun Bakare',    role: Role.HEADTEACHER,  schoolId: 'sch-1', createdAt: daysAgo(120), isActive: true },
     { id: 'user-admin-1',   phone: '08034567891', name: 'Mrs. Kemi Adeyemi',      role: Role.SCHOOLADMIN,  schoolId: 'sch-1', createdAt: daysAgo(120), isActive: true },
     { id: 'user-head-2',    phone: '08034567892', name: 'Mr. Chukwuemeka Nwosu',  role: Role.HEADTEACHER,  schoolId: 'sch-2', createdAt: daysAgo(120), isActive: true },
@@ -104,6 +111,27 @@ export function seedData(): void {
     { id: 'tcs-7', teacherId: 'user-teacher-3', classId: 'cls-jss3a', subject: 'Basic Science' },
     { id: 'tcs-8', teacherId: 'user-teacher-3', classId: 'cls-sss2a', subject: 'Chemistry' },
   ];
+
+  // Fill in the rest of the grid so every class is taught in every core subject
+  const SUBJECT_TEACHER: Record<string, string> = {
+    'Mathematics':      'user-teacher-1',
+    'English Language': 'user-teacher-2',
+    'Biology':          'user-teacher-3',
+    'Physics':          'user-teacher-4',
+    'Chemistry':        'user-teacher-5',
+  };
+  const existingPairs = new Set(tcs.map((t) => `${t.classId}|${t.subject}`));
+  for (const cls of classes) {
+    for (const subject of CORE_SUBJECTS) {
+      if (existingPairs.has(`${cls.id}|${subject}`)) continue;
+      tcs.push({
+        id: `tcs-${cls.id}-${subject.replace(/\s+/g, '-')}`,
+        teacherId: SUBJECT_TEACHER[subject],
+        classId: cls.id,
+        subject,
+      });
+    }
+  }
   tcsStore.saveMany(tcs);
 
   // ── Timetable (Mon–Fri, 8 periods) ────────────────────────────────
@@ -210,42 +238,56 @@ export function seedData(): void {
   }));
   topicStore.saveMany(topics);
 
-  // ── Diary Entries (class-level, past 8 weeks) ─────────────────────
-  const traitLevels = [1, 2, 3, 4, 5];
+  // ── Diary Entries (class-level, past 8 weeks, all classes × core subjects) ──
   const diaries: DiaryEntry[] = [];
   const attendanceRecords: StudentAttendance[] = [];
-  const snapshots: ReadinessSnapshot[] = [];
 
-  // Classes taught by teacher-1 (SSS1A Maths, SSS3A Maths)
-  const classDiaryConfig = [
-    { classId: 'cls-sss1a', teacherId: 'user-teacher-1', subject: 'Mathematics',      topicOffset: 0  },
-    { classId: 'cls-sss3a', teacherId: 'user-teacher-1', subject: 'Mathematics',      topicOffset: 5  },
-    { classId: 'cls-sss1b', teacherId: 'user-teacher-2', subject: 'English Language', topicOffset: 10 },
-    { classId: 'cls-sss2a', teacherId: 'user-teacher-3', subject: 'Biology',          topicOffset: 23 },
-    { classId: 'cls-sss2a', teacherId: 'user-teacher-3', subject: 'Chemistry',        topicOffset: 20 },
-  ];
+  // Per-class performance bands and per-subject offsets give the heatmap a
+  // realistic green/yellow/red mix
+  const CLASS_BASE: Record<string, number> = {
+    'cls-sss3a': 78, 'cls-jss1a': 74, 'cls-sss1a': 68, 'cls-sss1b': 64,
+    'cls-jss2a': 60, 'cls-sss2a': 56, 'cls-jss3a': 48,
+  };
+  const SUBJECT_DELTA: Record<string, number> = {
+    'Mathematics': -5, 'English Language': 4, 'Physics': -7, 'Chemistry': -1, 'Biology': 6,
+  };
+  // Drives this week's diary compliance per teacher (nudge demo on the school page)
+  const TEACHER_COMPLIANCE: Record<string, number> = {
+    'user-teacher-1': 0.95, 'user-teacher-2': 0.90, 'user-teacher-3': 0.70,
+    'user-teacher-4': 0.85, 'user-teacher-5': 0.55,
+  };
 
-  for (const cfg of classDiaryConfig) {
-    const classStudents = students.filter((s) => s.classId === cfg.classId);
-    const subjectTopics = topics.filter((t) => t.subject === cfg.subject);
+  const coreTcs = tcs.filter((t) => CORE_SUBJECTS.includes(t.subject));
+  for (const tc of coreTcs) {
+    const classStudents = students.filter((s) => s.classId === tc.classId);
+    const cls = classes.find((c) => c.id === tc.classId);
+    const subjectTopics = topics.filter((t) => t.subject === tc.subject);
+    // Prefer topics matching the class level so curriculum coverage registers
+    const levelTopics = subjectTopics.filter((t) => t.classLevel === cls?.level);
+    const topicPool = levelTopics.length > 0 ? levelTopics : subjectTopics;
+    if (classStudents.length === 0 || topicPool.length === 0) continue;
+
+    const baseScore  = (CLASS_BASE[tc.classId] ?? 60) + (SUBJECT_DELTA[tc.subject] ?? 0);
+    const compliance = TEACHER_COMPLIANCE[tc.teacherId] ?? 0.8;
 
     for (let week = 0; week < 8; week++) {
-      for (let day = 0; day < 3; day++) {
-        const daysOffset = week * 7 + day * 2 + 1;
+      for (let day = 0; day < 5; day++) {
+        // Current week: daily sessions gated by teacher compliance.
+        // Earlier weeks: Mon/Wed/Fri history is enough for trends.
+        if (week === 0) { if (Math.random() > compliance) continue; }
+        else if (day % 2 === 1) continue;
+
+        const daysOffset = week * 7 + day;
         const subDate = dateStr(daysOffset);
-        const topic = subjectTopics[((week * 3 + day) % subjectTopics.length)];
-        if (!topic) continue;
+        const topic = topicPool[(week * 5 + day) % topicPool.length];
 
-        // Vary performance: some classes struggling, some doing well
-        const baseScore = cfg.classId === 'cls-sss3a' ? 72 :
-                          cfg.classId === 'cls-sss2a' ? 58 : 65;
-        const classScore = Math.min(100, Math.max(30, baseScore + (Math.random() * 20 - 10)));
+        const classScore = Math.min(95, Math.max(25, baseScore + (Math.random() * 16 - 8)));
 
-        // Attendance: 85–95% attendance rate
+        // Attendance: ~90% attendance rate
         const presentStudents = classStudents.filter(() => Math.random() > 0.1);
         const absentStudents  = classStudents.filter((s) => !presentStudents.find((p) => p.id === s.id));
 
-        const traitBase = cfg.classId === 'cls-sss1a' ? 3 : 2;
+        const traitBase = baseScore >= 68 ? 3 : 2;
         const traits: Record<BehavioralTrait, number> = {
           [BehavioralTrait.ENGAGEMENT]:   Math.min(5, Math.max(1, traitBase + Math.round(Math.random() * 2 - 0.5))),
           [BehavioralTrait.PERSISTENCE]:  Math.min(5, Math.max(1, traitBase + Math.round(Math.random() * 2 - 0.5))),
@@ -255,10 +297,10 @@ export function seedData(): void {
         };
 
         const diary: DiaryEntry = {
-          id: uid(),
-          teacherId: cfg.teacherId,
-          classId: cfg.classId,
-          subject: cfg.subject,
+          id: `d-${tc.id}-w${week}-d${day}`,
+          teacherId: tc.teacherId,
+          classId: tc.classId,
+          subject: tc.subject,
           topicIds: [topic.id],
           classScore: Math.round(classScore),
           presentStudentIds: presentStudents.map((s) => s.id),
@@ -282,6 +324,35 @@ export function seedData(): void {
 
   diaries.forEach((d) => diaryStore.save(d));
   attendanceStore.saveMany(attendanceRecords);
+
+  // ── Quiz attempts for the three demo student logins ────────────────
+  // Blended into readiness (1.2× weight) so the three differentiate clearly
+  const attemptCfg: Array<[string, string, string, number, number]> = [
+    // [studentId, subject, topicId, score, daysAgo]
+    ['stu-1', 'Mathematics',      'topic-1',  85, 2],
+    ['stu-1', 'Mathematics',      'topic-2',  78, 5],
+    ['stu-1', 'Mathematics',      'topic-3',  90, 9],
+    ['stu-1', 'English Language', 'topic-11', 74, 4],
+    ['stu-2', 'Mathematics',      'topic-1',  38, 3],
+    ['stu-2', 'Mathematics',      'topic-2',  45, 7],
+    ['stu-2', 'English Language', 'topic-11', 52, 5],
+    ['stu-2', 'English Language', 'topic-12', 48, 10],
+    ['stu-3', 'Mathematics',      'topic-1',  62, 2],
+    ['stu-3', 'Mathematics',      'topic-3',  58, 8],
+    ['stu-3', 'English Language', 'topic-11', 66, 6],
+  ];
+  attemptCfg.forEach(([studentId, subject, topicId, score, ago], i) => {
+    const attempt: QuizAttempt = {
+      id: `qa-seed-${i + 1}`,
+      studentId, topicId, subject, score,
+      totalQuestions: 5,
+      correctCount: Math.round((score / 100) * 5),
+      timeTakenSeconds: 180 + Math.round(Math.random() * 240),
+      completedAt: daysAgo(ago),
+      source: 'cbt',
+    };
+    quizAttemptStore.save(attempt);
+  });
 
   // ── Term Calendar ──────────────────────────────────────────────────
   const terms: TermCalendar[] = [
@@ -314,6 +385,45 @@ export function seedData(): void {
       body: 'Your English Language SSS1B results have improved significantly this week. Attendance is at 92%. Keep it up!',
       severity: 'info', isRead: true, readAt: daysAgo(1), sentAt: daysAgo(3),
     },
+    // Principal's inbox
+    {
+      id: 'msg-4', fromUserId: 'user-district-1', fromRole: Role.DISTRICT, fromName: 'Education District I Office',
+      toUserId: 'user-head-1', subject: 'Termly Readiness Review — submission required',
+      body: 'Please submit your school\'s WAEC readiness summary and intervention log for the term. Include hotspot resolution rates and teacher diary compliance.',
+      severity: 'urgent', requiredResponseDate: dateStr(-4), isRead: false, sentAt: daysAgo(2),
+    },
+    {
+      id: 'msg-5', fromUserId: 'user-ministry-1', fromRole: Role.MINISTRY, fromName: 'Ministry of Education',
+      toUserId: 'user-head-1', subject: 'Circular: WAEC Mock Examination Schedule',
+      body: 'State-wide WAEC mock examinations hold in 6 weeks. Ensure SSS3 students complete at least 3 CBT practice sessions per subject before then.',
+      severity: 'info', isRead: false, sentAt: daysAgo(5),
+    },
+    {
+      id: 'msg-6', fromUserId: 'user-teacher-1', fromRole: Role.TEACHER, fromName: 'Mrs. Folasade Adebayo',
+      toUserId: 'user-head-1', subject: 'Request: extra Mathematics periods for JSS3A',
+      body: 'JSS3A Mathematics readiness remains low. I would like to run two extra after-school sessions weekly. Requesting approval and classroom allocation.',
+      severity: 'warning', isRead: true, readAt: daysAgo(1), sentAt: daysAgo(3),
+    },
+    // School admin's inbox
+    {
+      id: 'msg-7', fromUserId: 'user-head-1', fromRole: Role.HEADTEACHER, fromName: 'Mr. Olusegun Bakare',
+      toUserId: 'user-admin-1', subject: 'Prepare attendance summary for District',
+      body: 'Kindly compile the attendance summary for all classes this term ahead of the District review on Friday.',
+      severity: 'info', isRead: false, sentAt: daysAgo(1),
+    },
+    // Parents' inboxes
+    {
+      id: 'msg-8', fromUserId: 'user-teacher-1', fromRole: Role.TEACHER, fromName: 'Mrs. Folasade Adebayo',
+      toUserId: 'user-parent-1', subject: 'Abiodun is making strong progress',
+      body: 'Abiodun scored 85% on this week\'s Mathematics practice quiz and his class participation has been excellent. Encourage him to keep up the daily practice.',
+      severity: 'info', isRead: false, sentAt: daysAgo(2),
+    },
+    {
+      id: 'msg-9', fromUserId: 'user-teacher-1', fromRole: Role.TEACHER, fromName: 'Mrs. Folasade Adebayo',
+      toUserId: 'user-parent-2', subject: 'Chidinma needs support in Mathematics',
+      body: 'Chidinma is finding recent Mathematics topics difficult (38% on her last practice quiz). 20 minutes of guided practice at home each evening would make a real difference.',
+      severity: 'warning', isRead: false, sentAt: daysAgo(2),
+    },
   ];
   msgs.forEach((m) => messageStore.save(m));
 
@@ -321,6 +431,38 @@ export function seedData(): void {
 
   // Compute metrics for all sch-1 students
   students.forEach((s) => recomputeStudent(s.id));
+
+  // ── Interventions for the worst hotspots (distinct students, mixed states) ──
+  const sch1Ids = new Set(students.map((s) => s.id));
+  const seenStudents = new Set<string>();
+  const worstHotspots: Hotspot[] = [];
+  const openHotspots = hotspotStore.getOpen()
+    .filter((h) => sch1Ids.has(h.studentId))
+    .sort((a, b) => a.readinessScore - b.readinessScore);
+  for (const h of openHotspots) {
+    if (seenStudents.has(h.studentId)) continue;
+    seenStudents.add(h.studentId);
+    worstHotspots.push(h);
+    if (worstHotspots.length >= 5) break;
+  }
+  worstHotspots.forEach((h, i) => {
+    const status: 'open' | 'in_progress' | 'completed' =
+      i === 1 ? 'completed' : i === 2 ? 'in_progress' : 'open';
+    interventionStore.save({
+      id:          `iv-seed-${i + 1}`,
+      hotspotId:   h.id,
+      studentId:   h.studentId,
+      schoolId:    'sch-1',
+      assignedBy:  'user-head-1',
+      assignedTo:  SUBJECT_TEACHER[h.subject] ?? 'user-teacher-1',
+      description: `Remedial ${h.subject} support — readiness at ${Math.round(h.readinessScore)}%. After-school practice twice weekly plus targeted CBT drills.`,
+      // First one is overdue (2 days ago) to exercise the overdue alert; the rest are upcoming
+      dueDate:     i === 0 ? dateStr(2) : dateStr(-(3 + i * 2)),
+      status,
+      completedAt: status === 'completed' ? daysAgo(1) : undefined,
+      createdAt:   daysAgo(6),
+    });
+  });
 }
 
 // ── Multi-school seed (schools 2–5) ───────────────────────────────────────────
@@ -338,37 +480,39 @@ export function seedMultiSchool(): void {
     schoolId: string;
     baseScore: number;   // mean classScore for diary entries
     variance: number;    // ±spread
-    compliance: number;  // fraction of 3 sessions/week that get logged
-    teachers: { id: string; name: string; phone: string; subject: string }[];
+    compliance: number;  // fraction of weekly sessions that get logged
+    teachers: { id: string; name: string; phone: string; subjects: string[] }[];
   };
 
+  // Two teachers per school split the five core subjects between them so every
+  // student gets a readiness score in every subject
   const configs: SchoolCfg[] = [
     {
       schoolId: 'sch-2', baseScore: 73, variance: 10, compliance: 0.92,
       teachers: [
-        { id: 'user-t-s2-1', name: 'Mr. Seun Adeyemi',   phone: '08061111001', subject: 'Mathematics'      },
-        { id: 'user-t-s2-2', name: 'Mrs. Titi Obaseki',  phone: '08061111002', subject: 'English Language' },
+        { id: 'user-t-s2-1', name: 'Mr. Seun Adeyemi',   phone: '08061111001', subjects: ['Mathematics', 'Physics', 'Chemistry'] },
+        { id: 'user-t-s2-2', name: 'Mrs. Titi Obaseki',  phone: '08061111002', subjects: ['English Language', 'Biology']         },
       ],
     },
     {
       schoolId: 'sch-3', baseScore: 56, variance: 12, compliance: 0.72,
       teachers: [
-        { id: 'user-t-s3-1', name: 'Mr. Aliyu Garba',    phone: '08061111003', subject: 'Mathematics'      },
-        { id: 'user-t-s3-2', name: 'Mrs. Nneka Igwe',    phone: '08061111004', subject: 'Biology'          },
+        { id: 'user-t-s3-1', name: 'Mr. Aliyu Garba',    phone: '08061111003', subjects: ['Mathematics', 'Physics', 'Chemistry'] },
+        { id: 'user-t-s3-2', name: 'Mrs. Nneka Igwe',    phone: '08061111004', subjects: ['English Language', 'Biology']         },
       ],
     },
     {
       schoolId: 'sch-4', baseScore: 36, variance: 10, compliance: 0.52,
       teachers: [
-        { id: 'user-t-s4-1', name: 'Mr. Godwin Efe',     phone: '08061111005', subject: 'Chemistry'        },
-        { id: 'user-t-s4-2', name: 'Mrs. Shade Lemo',    phone: '08061111006', subject: 'English Language' },
+        { id: 'user-t-s4-1', name: 'Mr. Godwin Efe',     phone: '08061111005', subjects: ['Mathematics', 'Physics', 'Chemistry'] },
+        { id: 'user-t-s4-2', name: 'Mrs. Shade Lemo',    phone: '08061111006', subjects: ['English Language', 'Biology']         },
       ],
     },
     {
       schoolId: 'sch-5', baseScore: 52, variance: 11, compliance: 0.80,
       teachers: [
-        { id: 'user-t-s5-1', name: 'Mr. Emeka Okeke',    phone: '08061111007', subject: 'Physics'          },
-        { id: 'user-t-s5-2', name: 'Mrs. Amina Bello',   phone: '08061111008', subject: 'Mathematics'      },
+        { id: 'user-t-s5-1', name: 'Mr. Emeka Okeke',    phone: '08061111007', subjects: ['Mathematics', 'Physics', 'Chemistry'] },
+        { id: 'user-t-s5-2', name: 'Mrs. Amina Bello',   phone: '08061111008', subjects: ['English Language', 'Biology']         },
       ],
     },
   ];
@@ -400,13 +544,15 @@ export function seedMultiSchool(): void {
       createdAt: daysAgo(90), isActive: true,
     })));
 
-    // 2. TCS — each teacher covers SSS1A and SSS2A in their subject
-    const teachingClasses = [`cls-${schoolId}-SSS1`, `cls-${schoolId}-SSS2`];
+    // 2. TCS — each teacher covers all four class levels in their subjects
+    const teachingClasses = classLevels.map((lvl) => `cls-${schoolId}-${lvl}`);
     const newTcs: TeacherClassSubject[] = [];
     for (const t of teachers) {
-      teachingClasses.forEach((cId, ci) => {
-        newTcs.push({ id: `tcs-${t.id}-${ci}`, teacherId: t.id, classId: cId, subject: t.subject });
-      });
+      for (const subject of t.subjects) {
+        teachingClasses.forEach((cId, ci) => {
+          newTcs.push({ id: `tcs-${t.id}-${subject.replace(/\s+/g, '-')}-${ci}`, teacherId: t.id, classId: cId, subject });
+        });
+      }
     }
     tcsStore.saveMany(newTcs);
 
@@ -454,12 +600,12 @@ export function seedMultiSchool(): void {
       const topics = subjectTopics[tc.subject] ?? ['topic-1'];
 
       for (let week = 0; week < 8; week++) {
-        for (let day = 0; day < 3; day++) {
+        for (let day = 0; day < 2; day++) {
           // Skip some sessions based on compliance (creates realistic gaps)
           if (day > 0 && Math.random() > compliance) continue;
 
           const daysOffset  = week * 7 + day * 2 + 1;
-          const topicId     = topics[(week * 3 + day) % topics.length];
+          const topicId     = topics[(week * 2 + day) % topics.length];
           const classScore  = Math.min(100, Math.max(15, baseScore + (Math.random() * variance * 2 - variance)));
           const traitBase   = baseScore >= 70 ? 3 : 2;
 
@@ -467,7 +613,7 @@ export function seedMultiSchool(): void {
           const absent  = clsStudents.filter((s) => !present.find((p) => p.id === s.id));
 
           diaries.push({
-            id:       `d-${tc.teacherId.slice(-4)}-w${week}-d${day}-${tc.classId.slice(-4)}`,
+            id:       `d-${tc.id}-w${week}-d${day}`,
             teacherId: tc.teacherId,
             classId:   tc.classId,
             subject:   tc.subject,
@@ -601,4 +747,20 @@ export function seedQuestions(): void {
     },
   ];
   homework.forEach((hw) => homeworkStore.save(hw));
+
+  // ── Homework submissions (hw-1, SSS1A) — mixed results ─────────────────
+  const mkAnswers = (qIds: string[], correctFlags: boolean[]) =>
+    qIds.map((questionId, i) => ({
+      questionId,
+      chosen: correctFlags[i] ? 0 : 1 + (i % 3), // correctIndex is always 0 in the bank
+      correct: correctFlags[i],
+    }));
+  const hw1Qs = ['q-1-1', 'q-1-2', 'q-1-3', 'q-1-4', 'q-1-5'];
+  const submissions: HomeworkSubmission[] = [
+    { id: 'hws-1', homeworkId: 'hw-1', studentId: 'stu-1', answers: mkAnswers(hw1Qs, [true, true, true, true, false]),  score: 80,  submittedAt: daysAgo(1) },
+    { id: 'hws-2', homeworkId: 'hw-1', studentId: 'stu-2', answers: mkAnswers(hw1Qs, [true, false, true, false, true]), score: 60,  submittedAt: daysAgo(1) },
+    { id: 'hws-3', homeworkId: 'hw-1', studentId: 'stu-4', answers: mkAnswers(hw1Qs, [true, true, true, true, true]),   score: 100, submittedAt: daysAgo(0) },
+    { id: 'hws-4', homeworkId: 'hw-1', studentId: 'stu-6', answers: mkAnswers(hw1Qs, [false, true, false, true, false]),score: 40,  submittedAt: daysAgo(0) },
+  ];
+  submissions.forEach((s) => homeworkSubStore.save(s));
 }
