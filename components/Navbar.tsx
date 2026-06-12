@@ -149,7 +149,7 @@ export default function Navbar() {
 
           <button
             onClick={handleLogout}
-            className="text-xs px-2 py-1.5 rounded-md border transition-colors hidden sm:block"
+            className="text-xs px-2 py-1.5 rounded-md border transition-colors shrink-0"
             style={{ borderColor: 'rgba(255,255,255,0.3)', color: 'rgba(255,255,255,0.8)' }}
           >
             Logout
