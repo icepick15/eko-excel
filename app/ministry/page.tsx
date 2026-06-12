@@ -84,7 +84,7 @@ export default function MinistryDashboard() {
     <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
       <Navbar />
 
-      <main className="max-w-4xl mx-auto px-4 py-5 pb-10">
+      <main className="max-w-4xl lg:max-w-6xl mx-auto px-4 md:px-6 py-5 md:py-8 pb-10">
         {/* Header */}
         <div className="mb-5">
           <span className="text-xs font-bold px-2 py-0.5 rounded-full inline-block mb-1" style={{ background: '#FEF9C3', color: '#854D0E' }}>
@@ -132,6 +132,9 @@ export default function MinistryDashboard() {
           </div>
           <div className="absolute -bottom-10 -right-10 w-40 h-40 rounded-full opacity-10" style={{ background: '#FFCC00' }} />
         </div>
+
+        {/* These three cards flow into two columns on desktop */}
+        <div className="lg:grid lg:grid-cols-2 lg:gap-x-5 lg:items-start">
 
         {/* District comparison */}
         <div className="rounded-2xl p-4 mb-5" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
@@ -219,6 +222,8 @@ export default function MinistryDashboard() {
           )}
         </div>
 
+        </div>{/* end two-column grid */}
+
         {/* District × Subject heatmap */}
         <div className="rounded-2xl overflow-hidden mb-5" style={{ border: '1.5px solid #E5E7EB' }}>
           <div className="overflow-x-auto">
@@ -280,7 +285,7 @@ export default function MinistryDashboard() {
           <TrendChart data={getStateTrend()} height={80} />
 
           {/* Per-district mini trends */}
-          <div className="grid grid-cols-2 gap-4 mt-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-4">
             {districts.map((d) => {
               const tData = getDistrictTrend(d.id);
               const latest = tData.filter((p) => p.score > 0).slice(-1)[0]?.score ?? 0;
@@ -311,7 +316,7 @@ export default function MinistryDashboard() {
             <h2 className="font-bold text-sm mb-3" style={{ color: '#E30613' }}>
               Critical Alerts State-Wide ({totalHs})
             </h2>
-            <div className="grid sm:grid-cols-2 gap-2">
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 items-start">
               {allStudents
                 .flatMap((s) => hotspotStore.getByStudent(s.id).filter((h) => h.severity === 'critical').map((h) => ({ ...h, s })))
                 .slice(0, 8)

@@ -70,7 +70,7 @@ export default function TutorPage() {
   const router = useRouter();
   const [subject, setSubject] = useState(CORE_SUBJECTS[0]);
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: 'tutor', text: `Hello! I'm your EkoExcel AI Tutor. I'm here to help you with ${CORE_SUBJECTS[0]}. What would you like to understand today?` },
+    { role: 'tutor', text: `Hello! I'm Oluko, your AI tutor. I'm here to help you with ${CORE_SUBJECTS[0]}. What would you like to understand today?` },
   ]);
   const [input, setInput]     = useState('');
   const [typing, setTyping]   = useState(false);
@@ -117,7 +117,7 @@ export default function TutorPage() {
 
       {/* Subject selector */}
       <div className="sticky top-0 z-10 px-4 py-2 overflow-x-auto" style={{ background: '#0033A0' }}>
-        <div className="flex gap-2 max-w-2xl mx-auto">
+        <div className="flex gap-2 max-w-2xl md:max-w-3xl mx-auto">
           {CORE_SUBJECTS.map((s) => (
             <button
               key={s}
@@ -135,7 +135,7 @@ export default function TutorPage() {
       </div>
 
       {/* Chat messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 max-w-2xl mx-auto w-full">
+      <div className="flex-1 overflow-y-auto px-4 py-4 max-w-2xl md:max-w-3xl mx-auto w-full">
         <div className="flex flex-col gap-3">
           {messages.map((msg, i) => (
             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -146,7 +146,7 @@ export default function TutorPage() {
                 </div>
               )}
               <div
-                className="max-w-xs sm:max-w-sm rounded-2xl px-4 py-3 text-sm whitespace-pre-line"
+                className="max-w-xs sm:max-w-sm md:max-w-md lg:max-w-lg rounded-2xl px-4 py-3 text-sm whitespace-pre-line"
                 style={{
                   background: msg.role === 'user' ? '#0033A0' : 'white',
                   color: msg.role === 'user' ? 'white' : '#111827',
@@ -179,7 +179,7 @@ export default function TutorPage() {
       </div>
 
       {/* Suggestion chips */}
-      <div className="px-4 pb-2 max-w-2xl mx-auto w-full overflow-x-auto">
+      <div className="px-4 pb-2 max-w-2xl md:max-w-3xl mx-auto w-full overflow-x-auto">
         <div className="flex gap-2">
           {getSuggestions(subject).map((s) => (
             <button key={s} onClick={() => { setInput(s); }}
@@ -192,7 +192,7 @@ export default function TutorPage() {
       </div>
 
       {/* Input */}
-      <div className="px-4 pb-6 max-w-2xl mx-auto w-full">
+      <div className="px-4 pb-6 max-w-2xl md:max-w-3xl mx-auto w-full">
         <div className="flex gap-2">
           <input
             className="flex-1 rounded-xl px-4 py-3 text-sm"

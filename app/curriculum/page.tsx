@@ -178,7 +178,7 @@ function WaecUrgencyView({ userId }: { userId: string }) {
               <span className="px-2.5 py-0.5 rounded-full text-xs font-bold" style={{ background: bg, color }}>{label}</span>
               <span className="text-xs" style={{ color: '#9CA3AF' }}>WAEC weight {range} · {items.length} topic{items.length > 1 ? 's' : ''}</span>
             </div>
-            <div className="flex flex-col gap-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 items-start">
               {items.map((t) => (
                 <div
                   key={`${t.topicId}-${t.classId}`}
@@ -313,7 +313,7 @@ function TeacherView({ userId }: { userId: string }) {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3 mb-5">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
             {allCoverage
               .filter((c) => classSubjects.includes(c.subject))
               .map((cov) => (
@@ -371,7 +371,7 @@ function SchoolView({ schoolId }: { schoolId: string }) {
 
   return (
     <div>
-      <div className="grid grid-cols-2 gap-3 mb-5">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
         {coverage.map((cov) => (
           <SubjectCard
             key={cov.subject}
@@ -430,7 +430,7 @@ function DistrictView({ districtId }: { districtId: string }) {
 
   return (
     <div>
-      <div className="grid grid-cols-2 gap-3 mb-5">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
         {coverage.map((cov) => (
           <SubjectCard
             key={cov.subject}
@@ -488,7 +488,7 @@ function MinistryView() {
 
   return (
     <div>
-      <div className="grid grid-cols-2 gap-3 mb-5">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
         {coverage.map((cov) => (
           <SubjectCard
             key={cov.subject}
@@ -558,7 +558,7 @@ export default function CurriculumPage() {
   return (
     <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
       <Navbar />
-      <main className="max-w-2xl mx-auto px-4 py-5 pb-10">
+      <main className="max-w-2xl md:max-w-4xl lg:max-w-5xl mx-auto px-4 md:px-6 py-5 md:py-8 pb-10">
         {/* Header */}
         <div className="mb-5">
           <button onClick={() => router.back()} className="text-sm font-medium mb-2" style={{ color: '#0033A0' }}>←</button>

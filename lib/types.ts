@@ -98,6 +98,21 @@ export interface Student {
   isActive?: boolean;
 }
 
+// One completed class-level in a student's academic journey (JSS1 → current)
+export interface AcademicHistoryRecord {
+  id: string;               // ah-<studentId>-<level>
+  studentId: string;
+  classLevel: ClassLevel;
+  academicYear: string;     // e.g. '2021/2022'
+  schoolName: string;
+  termAverages: number[];   // [term1, term2, term3]
+  finalAverage: number;
+  positionInClass: number;
+  classSize: number;
+  promoted: boolean;
+  remark: string;
+}
+
 export interface TopicSegment {
   id: string;
   subject: string;
@@ -318,6 +333,18 @@ export interface HomeworkSubmission {
   answers: Array<{ questionId: string; chosen: number; correct: boolean }>;
   score: number;
   submittedAt: string;
+}
+
+// Handwritten (paper) homework snapped with the device camera — separate
+// from the computer-based assignments set by the teacher
+export interface HandwrittenSubmission {
+  id: string;
+  studentId: string;
+  subject: string;
+  note?: string;
+  imageDataUrl: string;   // downscaled JPEG data URL
+  submittedAt: string;
+  status: 'submitted' | 'reviewed';
 }
 
 // ============= Career Streaming =============

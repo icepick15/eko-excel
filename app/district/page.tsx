@@ -111,7 +111,7 @@ function DistrictContent() {
     <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
       <Navbar />
 
-      <main className="max-w-4xl mx-auto px-4 py-5 pb-10">
+      <main className="max-w-4xl lg:max-w-6xl mx-auto px-4 md:px-6 py-5 md:py-8 pb-10">
         {/* Header */}
         <div className="mb-5">
           {paramId && (
@@ -151,7 +151,7 @@ function DistrictContent() {
               <option value="name">Sort: Name</option>
             </select>
           </div>
-          <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 lg:gap-x-8 items-start">
             {schoolStats.map(({ school, studs, avg, hs, compliance }, rank) => {
               const color = scoreColor(avg);
               return (
@@ -232,7 +232,7 @@ function DistrictContent() {
             <TrendChart data={getDistrictTrend(viewDistrictId)} height={72} />
 
             {/* Per-school mini trends */}
-            <div className="grid grid-cols-2 gap-4 mt-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
               {schools.slice(0, 4).map((sc) => {
                 const tData = getSchoolTrend(sc.id);
                 const latest = tData.filter((p) => p.score > 0).slice(-1)[0]?.score ?? 0;

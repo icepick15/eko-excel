@@ -27,7 +27,7 @@ export default function Home() {
   return (
     <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--lagos-blue)' }}>
       <div className="text-white text-center">
-        <div className="text-2xl font-bold mb-2">Eko Excel</div>
+        <div className="text-2xl font-bold mb-2">Eko Learn</div>
         <div className="text-blue-200 text-sm">Loading...</div>
       </div>
     </div>

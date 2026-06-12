@@ -3,7 +3,7 @@ import './globals.css';
 import { AuthProvider } from '@/lib/auth-context';
 
 export const metadata: Metadata = {
-  title: 'Eko Excel – Lagos State Education Platform',
+  title: 'Eko Learn – Lagos State Education Platform',
   description: 'WAEC Readiness & Student Excellence Platform for Lagos State Schools',
 };
 

@@ -8,7 +8,7 @@ import Image from 'next/image';
 
 const ROLE_LABELS: Record<Role, string> = {
   [Role.TEACHER]:     'Teacher',
-  [Role.HEADTEACHER]: 'Head Teacher',
+  [Role.HEADTEACHER]: 'Principal',
   [Role.SCHOOLADMIN]: 'School Admin',
   [Role.DISTRICT]:    'District Officer',
   [Role.MINISTRY]:    'Ministry Official',
@@ -69,7 +69,7 @@ export default function Navbar() {
         { label: 'Dashboard', href: '/student' },
         { label: 'Homework',  href: '/homework' },
         { label: 'Quiz',      href: '/quiz' },
-        { label: 'AI Tutor',  href: '/tutor' },
+        { label: 'Oluko',     href: '/tutor' },
       ];
     }
     if (user!.role === Role.PARENT) {
@@ -95,7 +95,7 @@ export default function Navbar() {
             <Image src="/logo.png" alt="Lagos State" width={36} height={36} className="w-full h-full object-cover" priority />
           </div>
           <div className="hidden sm:block">
-            <div className="font-bold text-base leading-none tracking-tight">Eko Excel</div>
+            <div className="font-bold text-base leading-none tracking-tight">Eko Learn</div>
             <div style={{ color: '#A8C4F0', fontSize: '0.65rem' }}>Student Excellence Platform</div>
           </div>
         </div>

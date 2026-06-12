@@ -122,7 +122,7 @@ export default function StudentProfilePage() {
     <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
       <Navbar />
 
-      <main className="max-w-2xl mx-auto px-4 py-5 pb-10">
+      <main className="max-w-2xl md:max-w-4xl mx-auto px-4 md:px-6 py-5 md:py-8 pb-10">
         {/* Back */}
         <button onClick={() => router.back()} className="text-sm font-medium mb-4" style={{ color: '#0033A0' }}>
           ← Back
@@ -189,12 +189,12 @@ export default function StudentProfilePage() {
         {/* Intervention modal */}
         {showIntervention && (
           <div
-            className="fixed inset-0 z-50 flex items-end"
+            className="fixed inset-0 z-50 flex items-end md:items-center md:justify-center"
             style={{ background: 'rgba(0,0,0,0.4)' }}
             onClick={() => setShowIntervention(false)}
           >
             <div
-              className="w-full rounded-t-3xl p-6 pb-8"
+              className="w-full md:max-w-lg rounded-t-3xl md:rounded-3xl p-6 pb-8"
               style={{ background: 'white' }}
               onClick={(e) => e.stopPropagation()}
             >
@@ -230,7 +230,7 @@ export default function StudentProfilePage() {
 
         {/* Active hotspot alerts */}
         {hotspots.length > 0 && (
-          <div className="flex flex-col gap-2 mb-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 items-start mb-4">
             {hotspots.map((h) => {
               const sev = SEVERITY_STYLES[h.severity];
               return (
@@ -278,7 +278,7 @@ export default function StudentProfilePage() {
 
         {/* ── WAEC Readiness Tab ──────────────────────────────────────── */}
         {activeTab === 'overview' && (
-          <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
             {CORE_SUBJECTS.map((subject) => {
               const metric = metrics.find((m) => m.subject === subject);
               const score = metric?.readinessScore ?? 0;

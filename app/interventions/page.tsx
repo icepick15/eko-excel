@@ -140,7 +140,7 @@ export default function InterventionsPage() {
   return (
     <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
       <Navbar />
-      <main className="max-w-2xl mx-auto px-4 py-5 pb-10">
+      <main className="max-w-2xl md:max-w-4xl lg:max-w-5xl mx-auto px-4 md:px-6 py-5 md:py-8 pb-10">
 
         {/* Header */}
         <div className="flex items-center justify-between mb-5">
@@ -200,7 +200,7 @@ export default function InterventionsPage() {
             )}
           </div>
         ) : (
-          <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
             {filtered.map((iv) => {
               const student  = studentMap[iv.studentId ?? ''];
               const assignee = userMap[iv.assignedTo];
@@ -283,11 +283,11 @@ export default function InterventionsPage() {
       {/* Create modal — bottom sheet */}
       {showCreate && (
         <div
-          className="fixed inset-0 flex items-end justify-center z-50"
+          className="fixed inset-0 flex items-end md:items-center justify-center z-50"
           style={{ background: 'rgba(0,0,0,0.4)' }}
           onClick={(e) => { if (e.target === e.currentTarget) setShowCreate(false); }}
         >
-          <div className="w-full max-w-lg rounded-t-3xl p-6" style={{ background: 'white', maxHeight: '90vh', overflowY: 'auto' }}>
+          <div className="w-full max-w-lg rounded-t-3xl md:rounded-3xl p-6" style={{ background: 'white', maxHeight: '90vh', overflowY: 'auto' }}>
             <h2 className="font-black text-lg mb-4" style={{ color: '#0033A0' }}>Log Intervention</h2>
 
             <label className="text-xs font-bold mb-1 block" style={{ color: '#374151' }}>Student</label>

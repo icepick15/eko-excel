@@ -64,7 +64,7 @@ export default function ParentDashboard() {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: '#0033A0' }}>
         <div className="text-white text-center">
-          <div className="text-xl font-bold mb-2">Eko Excel</div>
+          <div className="text-xl font-bold mb-2">Eko Learn</div>
           <div className="text-sm" style={{ color: '#BFDBFE' }}>Loading report…</div>
         </div>
       </div>
@@ -133,7 +133,7 @@ export default function ParentDashboard() {
     return (
       <div className="min-h-screen flex flex-col" style={{ background: '#F5F7FA' }}>
         <Navbar />
-        <div className="max-w-2xl mx-auto w-full px-4 py-4 flex flex-col flex-1">
+        <div className="max-w-2xl md:max-w-3xl mx-auto w-full px-4 md:px-6 py-4 md:py-6 flex flex-col flex-1">
           <button onClick={() => setActiveThread(null)} className="flex items-center gap-1 text-sm mb-4" style={{ color: '#0033A0' }}>
             ← Back
           </button>
@@ -189,7 +189,7 @@ export default function ParentDashboard() {
     <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
       <Navbar />
 
-      <main className="max-w-2xl mx-auto px-4 py-5 pb-10">
+      <main className="max-w-2xl md:max-w-4xl mx-auto px-4 md:px-6 py-5 md:py-8 pb-10">
         {/* Header */}
         <div className="mb-4">
           <p className="text-xs font-bold" style={{ color: '#9CA3AF' }}>Parent Portal</p>
@@ -255,7 +255,7 @@ export default function ParentDashboard() {
             {messages.length === 0 ? (
               <p className="text-sm text-center py-8" style={{ color: '#9CA3AF' }}>No messages yet.</p>
             ) : (
-              <div className="flex flex-col gap-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 items-start">
                 {messages.map((msg) => (
                   <button
                     key={msg.id}
@@ -347,7 +347,7 @@ export default function ParentDashboard() {
               {/* Subject breakdown */}
               <div className="mb-4">
                 <p className="text-xs font-bold mb-2 uppercase tracking-wide" style={{ color: '#9CA3AF' }}>Subject Readiness</p>
-                <div className="flex flex-col gap-2">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 items-start">
                   {CORE_SUBJECTS.map((subject) => {
                     const metric = subjectMetrics.find((m) => m.subject === subject);
                     const score  = metric?.readinessScore ?? 0;

@@ -112,11 +112,11 @@ export default function TeacherDashboard() {
     <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
       <Navbar />
 
-      <main className="max-w-3xl mx-auto px-4 py-5 pb-10">
+      <main className="max-w-3xl lg:max-w-6xl mx-auto px-4 md:px-6 py-5 md:py-8 pb-10">
 
         {/* ── Header ────────────────────────────────────────────────── */}
         <div
-          className="rounded-2xl px-5 py-5 mb-5 relative overflow-hidden"
+          className="rounded-2xl px-5 py-5 md:px-7 md:py-7 mb-5 relative overflow-hidden"
           style={{ background: '#0033A0', color: 'white' }}
         >
           <div className="relative z-10">
@@ -193,6 +193,9 @@ export default function TeacherDashboard() {
             <span className="text-2xl">📋</span>
           </button>
         </div>
+
+        {/* Sections flow into two columns on desktop */}
+        <div className="lg:grid lg:grid-cols-2 lg:gap-x-5 lg:items-start">
 
         {/* ── Today's Timetable ──────────────────────────────────────── */}
         {dow > 0 && (
@@ -380,6 +383,8 @@ export default function TeacherDashboard() {
           )}
         </Section>
 
+        </div>{/* end section grid */}
+
         {/* ── Quick Nav ──────────────────────────────────────────────── */}
         <div className="grid grid-cols-4 gap-3 mt-5">
           <QuickNav icon="✉️" label="Messages"      badge={unreadMsgs}            onClick={() => router.push('/messages')} />
@@ -462,7 +467,7 @@ function LoadingScreen() {
   return (
     <div className="min-h-screen flex items-center justify-center" style={{ background: '#0033A0' }}>
       <div className="text-white text-center">
-        <div className="text-2xl font-black mb-2">EkoExcel</div>
+        <div className="text-2xl font-black mb-2">Eko Learn</div>
         <div className="text-sm opacity-60 animate-pulse">Loading...</div>
       </div>
     </div>

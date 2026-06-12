@@ -13,6 +13,7 @@ import {
   topicStore, quizAttemptStore, streakStore, classStore, careerStore,
 } from '@/lib/storage';
 import { recomputeStudent, getAttendanceRate, scoreColor, SCORE_GREEN, SCORE_YELLOW } from '@/lib/calculations';
+import { formatStudentId } from '@/lib/format';
 import Navbar from '@/components/Navbar';
 
 const SUBJECT_EMOJI: Record<string, string> = {
@@ -74,7 +75,7 @@ export default function StudentDashboard() {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: '#0033A0' }}>
         <div className="text-white text-center">
-          <div className="text-2xl font-black mb-2">EkoExcel</div>
+          <div className="text-2xl font-black mb-2">Eko Learn</div>
           <div className="text-sm opacity-60 animate-pulse">Loading your dashboard...</div>
         </div>
       </div>
@@ -96,16 +97,19 @@ export default function StudentDashboard() {
     <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
       <Navbar />
 
-      <main className="max-w-lg mx-auto px-4 py-5 pb-10">
+      <main className="max-w-lg md:max-w-3xl lg:max-w-6xl mx-auto px-4 md:px-6 py-5 md:py-8 pb-10">
 
         {/* ── Hero header ─────────────────────────────────────────────── */}
         <div
-          className="rounded-2xl p-5 mb-4 relative overflow-hidden"
+          className="rounded-2xl p-5 md:p-7 mb-4 md:mb-5 relative overflow-hidden"
           style={{ background: '#0033A0', color: 'white' }}
         >
           <div className="relative z-10">
             <p className="text-sm font-medium opacity-70">Welcome back,</p>
             <h1 className="text-xl font-black mt-0.5">{student.name.split(' ')[0]}</h1>
+            <p className="text-xs font-bold mt-0.5" style={{ color: '#FFCC00' }}>
+              Student ID: {formatStudentId(student.id)}
+            </p>
             <p className="text-xs opacity-50 mt-0.5">
               {cls?.level}{cls?.section} · {new Date().toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long' })}
             </p>
@@ -125,14 +129,18 @@ export default function StudentDashboard() {
           />
         </div>
 
+        {/* On desktop the cards split into a main column and a sidebar */}
+        <div className="lg:grid lg:grid-cols-3 lg:gap-5 lg:items-start">
+        <div className="lg:col-span-2">
+
         {/* ── Overall readiness ring ──────────────────────────────────── */}
         <div
           className="rounded-2xl p-5 mb-4 flex items-center gap-5"
           style={{ background: 'white', border: '1.5px solid #E5E7EB' }}
         >
           {/* SVG ring */}
-          <div className="shrink-0 relative w-20 h-20">
-            <svg viewBox="0 0 80 80" className="w-20 h-20 -rotate-90">
+          <div className="shrink-0 relative w-20 h-20 md:w-24 md:h-24">
+            <svg viewBox="0 0 80 80" className="w-full h-full -rotate-90">
               <circle cx="40" cy="40" r="34" fill="none" stroke="#F3F4F6" strokeWidth="8" />
               <circle
                 cx="40" cy="40" r="34" fill="none"
@@ -220,8 +228,8 @@ export default function StudentDashboard() {
                   onClick={() => subjectTopics[0] && router.push(`/quiz?subject=${encodeURIComponent(subject)}&topicId=${subjectTopics[0].id}`)}
                   className="flex flex-col items-center gap-1"
                 >
-                  <div className="relative w-12 h-12">
-                    <svg viewBox="0 0 48 48" className="w-12 h-12 -rotate-90">
+                  <div className="relative w-12 h-12 md:w-16 md:h-16">
+                    <svg viewBox="0 0 48 48" className="w-full h-full -rotate-90">
                       <circle cx="24" cy="24" r="20" fill="none" stroke="#F3F4F6" strokeWidth="4" />
                       <circle
                         cx="24" cy="24" r="20" fill="none"
@@ -247,6 +255,22 @@ export default function StudentDashboard() {
             ))}
           </div>
         </div>
+
+        {/* ── Academic History link ───────────────────────────────────── */}
+        <button
+          onClick={() => router.push('/student/history')}
+          className="w-full rounded-2xl p-4 mb-4 flex items-center gap-3 text-left"
+          style={{ background: 'white', border: '1.5px solid #E5E7EB' }}
+        >
+          <span className="text-2xl">📜</span>
+          <div className="flex-1">
+            <p className="font-bold text-sm" style={{ color: '#111827' }}>Academic History</p>
+            <p className="text-xs mt-0.5" style={{ color: '#9CA3AF' }}>
+              Your full journey from JSS1 to {cls?.level ?? 'today'}
+            </p>
+          </div>
+          <span className="text-sm font-bold" style={{ color: '#0033A0' }}>→</span>
+        </button>
 
         {/* ── Academic Mastery Heatmap ────────────────────────────────── */}
         <div className="rounded-2xl p-4 mb-4" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
@@ -287,7 +311,7 @@ export default function StudentDashboard() {
 
           {/* ── Subject grid ── */}
           {!heatmapSubject && (
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
               {CORE_SUBJECTS.map((subject) => {
                 const metric = metrics.find(m => m.subject === subject);
                 const score = Math.round(metric?.readinessScore ?? 0);
@@ -347,7 +371,7 @@ export default function StudentDashboard() {
             }
 
             return (
-              <div className="flex flex-col gap-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 items-start">
                 {subjectTopics.map((topic) => {
                   const score = topic.score;
                   const isUntried  = score === null;
@@ -425,6 +449,9 @@ export default function StudentDashboard() {
           })()}
         </div>
 
+        </div>{/* end main column */}
+        <div>
+
         {/* ── Stream Prediction ───────────────────────────────────────── */}
         {career && (
           <div
@@ -460,7 +487,7 @@ export default function StudentDashboard() {
               <p className="font-bold text-sm mb-3" style={{ color: '#E30613' }}>
                 ⚡ Weak Areas — Focus Here
               </p>
-              <div className="flex flex-col gap-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-1 gap-2">
                 {cleanHotspots.map((h) => {
                   const subjectTopics = topics.filter((t) => t.subject === h.subject);
                   const score = Math.round(h.readinessScore);
@@ -508,7 +535,7 @@ export default function StudentDashboard() {
               <p className="text-xs mt-1" style={{ color: '#9CA3AF' }}>Tap any subject ring above to start practising</p>
             </div>
           ) : (
-            <div className="flex flex-col gap-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-1 gap-2 items-start">
               {recentAttempts.map((attempt) => {
                 const topic = topics.find((t) => t.id === attempt.topicId);
                 const passed = attempt.score >= 65;
@@ -561,6 +588,9 @@ export default function StudentDashboard() {
             </p>
           </div>
         )}
+
+        </div>{/* end sidebar */}
+        </div>
       </main>
     </div>
   );

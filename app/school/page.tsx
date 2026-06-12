@@ -135,7 +135,7 @@ function SchoolContent() {
     <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
       <Navbar />
 
-      <main className="max-w-4xl mx-auto px-4 py-5 pb-10">
+      <main className="max-w-4xl lg:max-w-6xl mx-auto px-4 md:px-6 py-5 md:py-8 pb-10">
         {/* Header */}
         <div className="mb-5">
           <button onClick={() => router.back()} className="text-sm font-medium mb-2" style={{ color: '#0033A0' }}>←</button>
@@ -296,9 +296,9 @@ function SchoolContent() {
 
         {/* ── Trends Tab ───────────────────────────────────────────────── */}
         {activeTab === 'trends' && (
-          <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
             {/* School-wide trend */}
-            <div className="rounded-2xl p-4" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
+            <div className="rounded-2xl p-4 md:col-span-2" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
               <p className="font-bold text-sm mb-1" style={{ color: '#0033A0' }}>School-Wide Performance (8 weeks)</p>
               <p className="text-xs mb-3" style={{ color: '#9CA3AF' }}>Weekly average class score across all subjects</p>
               <TrendChart data={getSchoolTrend(schoolId)} height={80} />
@@ -350,7 +350,7 @@ function SchoolContent() {
 
         {/* ── Teachers Tab ─────────────────────────────────────────────── */}
         {activeTab === 'teachers' && (
-          <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
             {teacherStats.map(({ teacher, compliance, tcs }) => {
               const compColor = compliance.rate >= 90 ? '#008751' : compliance.rate >= 70 ? '#FFCC00' : '#E30613';
               return (

@@ -70,18 +70,18 @@ export function seedData(): void {
 
   // ── Users ──────────────────────────────────────────────────────────
   const users: User[] = [
-    { id: 'user-teacher-1', phone: '08012345678', name: 'Mrs. Adaeze Okonkwo',    role: Role.TEACHER,      schoolId: 'sch-1', createdAt: daysAgo(90),  isActive: true },
+    { id: 'user-teacher-1', phone: '08012345678', name: 'Mrs. Folasade Adebayo',    role: Role.TEACHER,      schoolId: 'sch-1', createdAt: daysAgo(90),  isActive: true },
     { id: 'user-teacher-2', phone: '08023456789', name: 'Mr. Babatunde Alli',     role: Role.TEACHER,      schoolId: 'sch-1', createdAt: daysAgo(90),  isActive: true },
     { id: 'user-teacher-3', phone: '08098765432', name: 'Mrs. Ngozi Eze',         role: Role.TEACHER,      schoolId: 'sch-1', createdAt: daysAgo(80),  isActive: true },
-    { id: 'user-head-1',    phone: '08034567890', name: 'Mr. Emmanuel Chukwu',    role: Role.HEADTEACHER,  schoolId: 'sch-1', createdAt: daysAgo(120), isActive: true },
+    { id: 'user-head-1',    phone: '08034567890', name: 'Mr. Olusegun Bakare',    role: Role.HEADTEACHER,  schoolId: 'sch-1', createdAt: daysAgo(120), isActive: true },
     { id: 'user-admin-1',   phone: '08034567891', name: 'Mrs. Kemi Adeyemi',      role: Role.SCHOOLADMIN,  schoolId: 'sch-1', createdAt: daysAgo(120), isActive: true },
     { id: 'user-head-2',    phone: '08034567892', name: 'Mr. Chukwuemeka Nwosu',  role: Role.HEADTEACHER,  schoolId: 'sch-2', createdAt: daysAgo(120), isActive: true },
     { id: 'user-head-3',    phone: '08034567893', name: 'Mrs. Aisha Mohammed',    role: Role.HEADTEACHER,  schoolId: 'sch-3', createdAt: daysAgo(120), isActive: true },
     { id: 'user-head-4',    phone: '08034567894', name: 'Mr. Rotimi Fadipe',      role: Role.HEADTEACHER,  schoolId: 'sch-4', createdAt: daysAgo(120), isActive: true },
     { id: 'user-head-5',    phone: '08034567895', name: 'Mrs. Bola Ogundimu',     role: Role.HEADTEACHER,  schoolId: 'sch-5', createdAt: daysAgo(120), isActive: true },
-    { id: 'user-district-1',phone: '08045678901', name: 'Dr. Fatima Sule',        role: Role.DISTRICT,     districtId: 'dist-1', createdAt: daysAgo(150), isActive: true },
-    { id: 'user-district-2',phone: '08045678902', name: 'Mr. Kunle Olatunji',     role: Role.DISTRICT,     districtId: 'dist-2', createdAt: daysAgo(150), isActive: true },
-    { id: 'user-ministry-1',phone: '08056789012', name: 'Hon. Gbenga Adewale',    role: Role.MINISTRY,     createdAt: daysAgo(200), isActive: true },
+    { id: 'user-district-1',phone: '08045678901', name: 'Education District I Office',        role: Role.DISTRICT,     districtId: 'dist-1', createdAt: daysAgo(150), isActive: true },
+    { id: 'user-district-2',phone: '08045678902', name: 'Education District II Office',     role: Role.DISTRICT,     districtId: 'dist-2', createdAt: daysAgo(150), isActive: true },
+    { id: 'user-ministry-1',phone: '08056789012', name: 'Ministry of Education',    role: Role.MINISTRY,     createdAt: daysAgo(200), isActive: true },
     { id: 'user-student-1', phone: '08067890123', name: 'Abiodun Fashola',        role: Role.STUDENT,      schoolId: 'sch-1', studentId: 'stu-1',  createdAt: daysAgo(300), isActive: true },
     { id: 'user-student-2', phone: '08078901234', name: 'Chidinma Obi',           role: Role.STUDENT,      schoolId: 'sch-1', studentId: 'stu-2',  createdAt: daysAgo(300), isActive: true },
     { id: 'user-student-3', phone: '08079012345', name: 'Emeka Nwosu',            role: Role.STUDENT,      schoolId: 'sch-1', studentId: 'stu-3',  createdAt: daysAgo(300), isActive: true },
@@ -297,19 +297,19 @@ export function seedData(): void {
   // ── Seed Messages (admin → teacher) ────────────────────────────────
   const msgs: Message[] = [
     {
-      id: 'msg-1', fromUserId: 'user-head-1', fromRole: Role.HEADTEACHER, fromName: 'Mr. Emmanuel Chukwu',
+      id: 'msg-1', fromUserId: 'user-head-1', fromRole: Role.HEADTEACHER, fromName: 'Mr. Olusegun Bakare',
       toUserId: 'user-teacher-1', subject: 'Diary Submission Reminder',
       body: 'Dear Mrs. Okonkwo, please ensure your Mathematics SSS1A diary is submitted daily before 4PM. Your compliance rate last week was 80%. Target is 90%+.',
       severity: 'warning', isRead: false, sentAt: daysAgo(2),
     },
     {
-      id: 'msg-2', fromUserId: 'user-district-1', fromRole: Role.DISTRICT, fromName: 'Dr. Fatima Sule',
+      id: 'msg-2', fromUserId: 'user-district-1', fromRole: Role.DISTRICT, fromName: 'Education District I Office',
       toUserId: 'user-teacher-1', subject: 'Support Query: Low Readiness — SSS1A Mathematics',
       body: 'Data shows SSS1A Mathematics readiness is below 60%. Please describe the interventions you have put in place this term. Response required by Friday.',
       severity: 'urgent', requiredResponseDate: dateStr(-3), isRead: false, sentAt: daysAgo(4),
     },
     {
-      id: 'msg-3', fromUserId: 'user-head-1', fromRole: Role.HEADTEACHER, fromName: 'Mr. Emmanuel Chukwu',
+      id: 'msg-3', fromUserId: 'user-head-1', fromRole: Role.HEADTEACHER, fromName: 'Mr. Olusegun Bakare',
       toUserId: 'user-teacher-2', subject: 'Well done — English Language',
       body: 'Your English Language SSS1B results have improved significantly this week. Attendance is at 92%. Keep it up!',
       severity: 'info', isRead: true, readAt: daysAgo(1), sentAt: daysAgo(3),
@@ -496,7 +496,7 @@ export function seedMultiSchool(): void {
 
   // ── Extra district users for dist-3, dist-4, dist-5 ─────────────────
   userStore.saveMany([
-    { id: 'user-dist-3', phone: '08045678903', name: 'Mrs. Ngozi Okoye',   role: Role.DISTRICT, districtId: 'dist-3', createdAt: daysAgo(150), isActive: true },
+    { id: 'user-dist-3', phone: '08045678903', name: 'Education District III Office',   role: Role.DISTRICT, districtId: 'dist-3', createdAt: daysAgo(150), isActive: true },
     { id: 'user-dist-4', phone: '08045678904', name: 'Mr. Seun Adeola',    role: Role.DISTRICT, districtId: 'dist-4', createdAt: daysAgo(150), isActive: true },
     { id: 'user-dist-5', phone: '08045678905', name: 'Dr. Bisi Akinwande', role: Role.DISTRICT, districtId: 'dist-5', createdAt: daysAgo(150), isActive: true },
   ]);

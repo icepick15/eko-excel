@@ -187,7 +187,7 @@ export default function ReportsPage() {
     const distName = selectedDist === 'all'
       ? 'StateWide'
       : (districts.find((d) => d.id === selectedDist)?.name ?? selectedDist).replace(/\s+/g, '_');
-    const filename = `EkoExcel_${def.label.replace(/\s+/g, '_')}_${distName}_${today}.csv`;
+    const filename = `EkoLearn_${def.label.replace(/\s+/g, '_')}_${distName}_${today}.csv`;
     downloadCSV(filename, toCSV(reportData.headers, reportData.rows));
     setExportedAt(new Date().toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' }));
   }
@@ -201,7 +201,7 @@ export default function ReportsPage() {
     <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
       <Navbar />
 
-      <main className="max-w-4xl mx-auto px-4 py-5 pb-10">
+      <main className="max-w-4xl lg:max-w-5xl mx-auto px-4 md:px-6 py-5 md:py-8 pb-10">
 
         {/* Header */}
         <div className="mb-5">
@@ -221,7 +221,7 @@ export default function ReportsPage() {
 
           {/* Report type selector */}
           <p className="text-xs font-semibold mb-2" style={{ color: '#374151' }}>Report Type</p>
-          <div className="grid grid-cols-2 gap-2 mb-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
             {REPORT_DEFS.map((def) => (
               <button
                 key={def.id}
@@ -364,7 +364,7 @@ export default function ReportsPage() {
         {/* About section */}
         <div className="rounded-2xl p-4" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
           <h2 className="font-bold text-sm mb-3" style={{ color: '#0033A0' }}>About These Reports</h2>
-          <div className="flex flex-col gap-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {REPORT_DEFS.map((def) => (
               <div key={def.id} className="flex items-start gap-2 text-xs">
                 <span className="shrink-0 mt-0.5">{def.icon}</span>

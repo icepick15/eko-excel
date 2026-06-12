@@ -5,6 +5,7 @@ import type {
   Hotspot, Intervention, Message, Notification, TermCalendar, AuditLog,
   QuizQuestion, StudentSeenQuestions, QuizAttempt, PracticeStreak,
   HomeworkAssignment, HomeworkSubmission, CareerRecommendation, ParentOptOut,
+  AcademicHistoryRecord, HandwrittenSubmission,
 } from './types';
 
 // ============= Storage keys =============
@@ -36,6 +37,8 @@ const K = {
   homeworkSubs:       'eko_homework_subs',
   career:             'eko_career',
   parentOptOut:       'eko_parent_optout',
+  academicHistory:    'eko_academic_history',
+  handwrittenSubs:    'eko_handwritten_subs',
   currentUser:        'eko_current_user',
   seeded:             'eko_seeded_v4',
 } as const;
@@ -457,6 +460,15 @@ export const homeworkSubStore = {
   save:           (s: HomeworkSubmission) => upsert(K.homeworkSubs, s),
 };
 
+// ============= Handwritten Homework Submissions =============
+export const handwrittenSubStore = {
+  getByStudent: (sId: string) =>
+    get<HandwrittenSubmission>(K.handwrittenSubs)
+      .filter((x) => x.studentId === sId)
+      .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)),
+  save: (x: HandwrittenSubmission) => upsert(K.handwrittenSubs, x),
+};
+
 // ============= Career Recommendations =============
 export const careerStore = {
   getByStudent: (sId: string) => get<CareerRecommendation>(K.career).find((c) => c.studentId === sId),
@@ -467,6 +479,12 @@ export const careerStore = {
     set(K.career, all);
     return c;
   },
+};
+
+// ============= Academic History =============
+export const academicHistoryStore = {
+  getByStudent: (sId: string) => get<AcademicHistoryRecord>(K.academicHistory).filter((r) => r.studentId === sId),
+  saveMany:     (items: AcademicHistoryRecord[]) => addMany(K.academicHistory, items),
 };
 
 // ============= Parent Opt-Out =============

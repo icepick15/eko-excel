@@ -48,7 +48,7 @@ export default function NotificationsPage() {
   return (
     <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
       <Navbar />
-      <main className="max-w-2xl mx-auto px-4 py-5 pb-10">
+      <main className="max-w-2xl md:max-w-3xl lg:max-w-4xl mx-auto px-4 md:px-6 py-5 md:py-8 pb-10">
         {/* Header */}
         <div className="flex items-center justify-between mb-5">
           <div>
@@ -76,7 +76,7 @@ export default function NotificationsPage() {
             <p className="text-sm mt-1" style={{ color: '#9CA3AF' }}>No notifications yet.</p>
           </div>
         ) : (
-          <div className="flex flex-col gap-2">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 items-start">
             {notifications.map((n) => {
               const style = TYPE_STYLE[n.type] ?? TYPE_STYLE.nudge;
               return (

@@ -199,7 +199,7 @@ function QuizContent() {
     return (
       <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
         <Navbar />
-        <main className="max-w-md mx-auto px-4 py-8">
+        <main className="max-w-md md:max-w-3xl mx-auto px-4 py-8 md:py-12">
           <button onClick={() => router.back()} className="text-sm font-medium mb-6" style={{ color: '#0033A0' }}>
             ← Back
           </button>
@@ -208,7 +208,7 @@ function QuizContent() {
             {topicName} · {subject}
           </p>
 
-          <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-stretch">
             <button
               onClick={() => startMode('normal')}
               className="p-5 rounded-2xl text-left"
@@ -259,7 +259,7 @@ function QuizContent() {
     return (
       <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
         <Navbar />
-        <div className="max-w-md mx-auto px-4 py-8">
+        <div className="max-w-md md:max-w-2xl mx-auto px-4 py-8">
           <div className="text-center mb-6">
             <div
               className="w-24 h-24 rounded-full mx-auto flex items-center justify-center text-4xl mb-4"
@@ -315,7 +315,7 @@ function QuizContent() {
             })}
           </div>
 
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col md:flex-row gap-3">
             <button
               onClick={() => { setMode(null); setShowResult(false); setQuestions([]); }}
               className="w-full py-4 rounded-2xl font-bold text-white text-sm"
@@ -347,7 +347,7 @@ function QuizContent() {
     <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
       <Navbar />
 
-      <main className="max-w-lg mx-auto px-4 py-5">
+      <main className="max-w-lg md:max-w-2xl mx-auto px-4 py-5 md:py-8">
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
           <button onClick={() => setMode(null)} className="text-sm font-medium" style={{ color: '#0033A0' }}>

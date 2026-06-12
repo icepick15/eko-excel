@@ -251,7 +251,7 @@ export default function DiaryEntryPage() {
         </div>
       </div>
 
-      <main className="max-w-2xl mx-auto px-4 py-6 pb-28">
+      <main className="max-w-2xl md:max-w-3xl mx-auto px-4 md:px-6 py-6 md:py-8 pb-28">
 
         {/* ── Step 0: Class + Subject ───────────────────────────────────── */}
         {step === 0 && (
@@ -270,7 +270,7 @@ export default function DiaryEntryPage() {
                 </p>
               </div>
             ) : (
-              <div className="flex flex-col gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
                 {myTcs.map((tcs) => {
                   const cls = classStore.getById(tcs.classId);
                   const isSelected = tcs.id === selectedTcsId;
@@ -502,7 +502,7 @@ export default function DiaryEntryPage() {
             {/* Behavioural traits */}
             <div className="card">
               <h3 className="text-sm font-bold mb-4" style={{ color: '#0033A0' }}>Behavioural Traits</h3>
-              <div className="flex flex-col gap-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 {Object.values(BehavioralTrait).map((trait) => (
                   <div key={trait}>
                     <div className="flex items-center justify-between mb-2">
@@ -630,7 +630,7 @@ export default function DiaryEntryPage() {
           className="fixed bottom-0 left-0 right-0 px-4 py-4"
           style={{ background: 'var(--background)', borderTop: '1px solid var(--border)' }}
         >
-          <div className="max-w-2xl mx-auto">
+          <div className="max-w-2xl md:max-w-3xl mx-auto">
             <button
               onClick={() => {
                 if (step === 3 || canProceed()) setStep(step + 1);

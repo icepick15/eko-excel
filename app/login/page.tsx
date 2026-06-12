@@ -5,16 +5,27 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { Role } from '@/lib/types';
+import { formatStudentId } from '@/lib/format';
 
+// District/ministry accounts represent the office, not an individual —
+// no personal names or phone numbers are displayed for them.
+interface DemoAccount {
+  phone: string;
+  name: string;
+  role: string;
+  highlight: boolean;
+  office?: boolean;
+  studentId?: string;
+}
 
-const DEMO_ACCOUNTS = [
-  { phone: '08012345678', name: 'Mrs. Adaeze Okonkwo',  role: 'Teacher',           highlight: false },
-  { phone: '08034567890', name: 'Mr. Emmanuel Chukwu',  role: 'Head Teacher',       highlight: false },
-  { phone: '08045678901', name: 'Dr. Fatima Sule',       role: 'District I Officer', highlight: false },
-  { phone: '08045678903', name: 'Mrs. Ngozi Okoye',      role: 'District III Officer',highlight: false },
-  { phone: '08056789012', name: 'Hon. Gbenga Adewale',   role: 'Ministry Official',  highlight: true  },
-  { phone: '08067890123', name: 'Abiodun Fashola',       role: 'Student (SS1)',      highlight: false },
-  { phone: '08089012345', name: 'Mr. Taiwo Fashola',     role: 'Parent',             highlight: false },
+const DEMO_ACCOUNTS: DemoAccount[] = [
+  { phone: '08012345678', name: 'Mrs. Folasade Adebayo', role: 'Teacher',              highlight: false },
+  { phone: '08034567890', name: 'Mr. Olusegun Bakare',   role: 'Principal',            highlight: false },
+  { phone: '08045678901', name: 'Office Account',         role: 'District I Office',    highlight: false, office: true },
+  { phone: '08045678903', name: 'Office Account',         role: 'District III Office',  highlight: false, office: true },
+  { phone: '08056789012', name: 'Office Account',         role: 'Ministry of Education',highlight: true,  office: true },
+  { phone: '08067890123', name: 'Abiodun Fashola',        role: 'Student (SS1)',        highlight: false, studentId: 'stu-1' },
+  { phone: '08089012345', name: 'Mr. Taiwo Fashola',      role: 'Parent',               highlight: false },
 ];
 
 export default function LoginPage() {
@@ -88,7 +99,7 @@ export default function LoginPage() {
           >
             <Image src="/logo.png" alt="Lagos State Government" width={80} height={80} className="w-full h-full object-cover" priority />
           </div>
-          <h1 className="text-3xl font-black text-white tracking-tight">Eko Excel</h1>
+          <h1 className="text-3xl font-black text-white tracking-tight">Eko Learn</h1>
           <p style={{ color: '#A8C4F0' }} className="text-sm mt-1">
             Student Excellence Platform
           </p>
@@ -176,7 +187,14 @@ export default function LoginPage() {
                 >
                   <div className="font-semibold">{acc.role}</div>
                   <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.65rem' }}>{acc.name}</div>
-                  <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.6rem' }}>{acc.phone}</div>
+                  {acc.studentId && (
+                    <div style={{ color: '#FFCC00', fontSize: '0.65rem' }} className="font-semibold">
+                      Student ID: {formatStudentId(acc.studentId)}
+                    </div>
+                  )}
+                  {!acc.office && (
+                    <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.6rem' }}>{acc.phone}</div>
+                  )}
                 </button>
               ))}
             </div>
@@ -186,7 +204,7 @@ export default function LoginPage() {
 
       {/* Footer */}
       <div className="py-4 text-center" style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.65rem' }}>
-        © 2026 Lagos State Ministry of Education &nbsp;·&nbsp; Eko Excel v1.0 &nbsp;·&nbsp; All data stored locally
+        © 2026 Lagos State Ministry of Education &nbsp;·&nbsp; Eko Learn v1.0 &nbsp;·&nbsp; All data stored locally
       </div>
     </div>
   );

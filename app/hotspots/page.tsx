@@ -138,7 +138,7 @@ export default function HotspotsPage() {
   return (
     <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
       <Navbar />
-      <main className="max-w-2xl mx-auto px-4 py-5 pb-10">
+      <main className="max-w-2xl md:max-w-4xl lg:max-w-5xl mx-auto px-4 md:px-6 py-5 md:py-8 pb-10">
 
         {/* Header */}
         <div className="flex items-center gap-2 mb-5">
@@ -189,7 +189,7 @@ export default function HotspotsPage() {
             <p className="text-sm mt-1" style={{ color: '#9CA3AF' }}>All students are above the 70% readiness threshold</p>
           </div>
         ) : (
-          <div className="flex flex-col gap-3 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start mb-6">
             {filtered.map((h) => {
               const student = studentMap[h.studentId];
               const cls = student ? classMap[student.classId] : null;
@@ -288,7 +288,7 @@ export default function HotspotsPage() {
             <h2 className="text-sm font-bold mb-3" style={{ color: '#6B7280' }}>
               Resolved ({closed.length})
             </h2>
-            <div className="flex flex-col gap-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 items-start">
               {closed.slice(0, 5).map((h) => {
                 const student = studentMap[h.studentId];
                 return (
@@ -316,11 +316,11 @@ export default function HotspotsPage() {
       {/* Log Intervention modal — bottom sheet */}
       {assigning && (
         <div
-          className="fixed inset-0 flex items-end justify-center z-50"
+          className="fixed inset-0 flex items-end md:items-center justify-center z-50"
           style={{ background: 'rgba(0,0,0,0.4)' }}
           onClick={(e) => { if (e.target === e.currentTarget) setAssigning(null); }}
         >
-          <div className="w-full max-w-lg rounded-t-3xl p-6" style={{ background: 'white', maxHeight: '90vh', overflowY: 'auto' }}>
+          <div className="w-full max-w-lg rounded-t-3xl md:rounded-3xl p-6" style={{ background: 'white', maxHeight: '90vh', overflowY: 'auto' }}>
             <div className="mb-4">
               <h2 className="font-black text-lg" style={{ color: '#0033A0' }}>Log Intervention</h2>
               <p className="text-sm mt-1" style={{ color: '#6B7280' }}>

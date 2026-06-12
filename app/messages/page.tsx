@@ -77,7 +77,7 @@ export default function MessagesPage() {
     return (
       <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
         <Navbar />
-        <main className="max-w-2xl mx-auto px-4 py-5 pb-24">
+        <main className="max-w-2xl md:max-w-3xl mx-auto px-4 md:px-6 py-5 md:py-8 pb-24">
           <button
             onClick={() => setSelected(null)}
             className="text-sm font-medium mb-4 flex items-center gap-1"
@@ -147,7 +147,7 @@ export default function MessagesPage() {
             className="fixed bottom-0 left-0 right-0 p-4"
             style={{ background: 'white', borderTop: '1px solid #E5E7EB' }}
           >
-            <div className="max-w-2xl mx-auto flex gap-3">
+            <div className="max-w-2xl md:max-w-3xl mx-auto flex gap-3">
               <textarea
                 className="flex-1 rounded-xl px-4 py-3 text-sm resize-none"
                 style={{ border: '1.5px solid #D1D5DB', background: '#F9FAFB', minHeight: 56, maxHeight: 120 }}
@@ -175,7 +175,7 @@ export default function MessagesPage() {
   return (
     <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
       <Navbar />
-      <main className="max-w-2xl mx-auto px-4 py-5">
+      <main className="max-w-2xl md:max-w-3xl lg:max-w-4xl mx-auto px-4 md:px-6 py-5 md:py-8">
         {/* Header */}
         <div className="flex items-center gap-2 mb-5">
           <button onClick={() => router.back()} style={{ color: '#0033A0' }} className="text-sm font-medium">
@@ -199,7 +199,7 @@ export default function MessagesPage() {
             <p className="text-sm mt-1" style={{ color: '#9CA3AF' }}>Messages from your school and district will appear here</p>
           </div>
         ) : (
-          <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
             {messages.map((msg) => {
               const sev = SEVERITY_STYLES[msg.severity ?? 'info'];
               return (
