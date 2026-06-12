@@ -108,8 +108,8 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* Login card */}
-        <div className="w-full max-w-sm">
+        {/* Login card — sits beside the demo accounts on large screens */}
+        <div className="w-full max-w-sm lg:max-w-3xl lg:grid lg:grid-cols-2 lg:gap-8 lg:items-center">
           <div className="card shadow-2xl">
             <h2 className="text-lg font-bold mb-1" style={{ color: 'var(--lagos-blue)' }}>
               {step === 'phone' ? 'Sign In with Phone' : 'Verify OTP'}
@@ -173,7 +173,7 @@ export default function LoginPage() {
           </div>
 
           {/* Demo accounts */}
-          <div className="mt-5">
+          <div className="mt-5 lg:mt-0">
             <p className="text-center text-xs mb-3" style={{ color: 'rgba(255,255,255,0.6)' }}>
               DEMO ACCOUNTS — Click to auto-fill
             </p>
