@@ -6,7 +6,7 @@ import { useAuth } from '@/lib/auth-context';
 import { Role, ColorStatus, CORE_SUBJECTS } from '@/lib/types';
 import type { District, School, Student } from '@/lib/types';
 import { districtStore, schoolStore, studentStore, metricsStore, hotspotStore } from '@/lib/storage';
-import { getSchoolReadinessAvg, scoreColor, scoreBg, SCORE_GREEN, SCORE_YELLOW, getStateTrend, getDistrictTrend } from '@/lib/calculations';
+import { getSchoolReadinessAvg, scoreColor, scoreBg, SCORE_GREEN, SCORE_YELLOW, getStateTrend, getDistrictTrend, getStateSubjectCoverage } from '@/lib/calculations';
 import { generateAlerts } from '@/lib/alerts';
 import TrendChart from '@/components/TrendChart';
 import Navbar from '@/components/Navbar';
@@ -278,6 +278,9 @@ export default function MinistryDashboard() {
           </div>
         </div>
 
+        {/* Curriculum Coverage summary */}
+        <CurriculumCoverageCard onNavigate={() => router.push('/curriculum')} />
+
         {/* State-wide trend */}
         <div className="rounded-2xl p-4 mb-5" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
           <h2 className="font-bold text-sm mb-1" style={{ color: '#0033A0' }}>State Performance Trend (8 weeks)</h2>
@@ -343,6 +346,78 @@ export default function MinistryDashboard() {
           </div>
         )}
       </main>
+    </div>
+  );
+}
+
+function CurriculumCoverageCard({ onNavigate }: { onNavigate: () => void }) {
+  const coverage = getStateSubjectCoverage();
+  const overallPct = coverage.length > 0
+    ? Math.round(coverage.reduce((a, c) => a + c.coveragePercent, 0) / coverage.length)
+    : 0;
+
+  const SUBJECT_SHORT: Record<string, string> = {
+    'Mathematics':      'Maths',
+    'English Language': 'English',
+    'Physics':          'Physics',
+    'Chemistry':        'Chem',
+    'Biology':          'Biology',
+  };
+
+  function covColor(pct: number) {
+    if (pct >= 70) return '#008751';
+    if (pct >= 40) return '#FFCC00';
+    return '#E30613';
+  }
+  function covBg(pct: number) {
+    if (pct >= 70) return '#F0FDF4';
+    if (pct >= 40) return '#FFFBEB';
+    return '#FEF2F2';
+  }
+
+  return (
+    <div className="rounded-2xl p-4 mb-5" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="font-bold text-sm" style={{ color: '#0033A0' }}>State Curriculum Coverage</h2>
+          <p className="text-xs" style={{ color: '#9CA3AF' }}>% of WAEC syllabus taught across all schools</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="text-right">
+            <p className="text-2xl font-black" style={{ color: covColor(overallPct) }}>{overallPct}%</p>
+            <p className="text-xs" style={{ color: '#9CA3AF' }}>Overall</p>
+          </div>
+          <button
+            onClick={onNavigate}
+            className="text-xs font-bold px-3 py-1.5 rounded-xl"
+            style={{ background: '#EFF6FF', color: '#0033A0' }}
+          >
+            Full Detail →
+          </button>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {coverage.map((cov) => {
+          const color = covColor(cov.coveragePercent);
+          return (
+            <div key={cov.subject} className="flex items-center gap-3">
+              <p className="text-xs font-semibold w-16 shrink-0" style={{ color: '#374151' }}>
+                {SUBJECT_SHORT[cov.subject] ?? cov.subject.split(' ')[0]}
+              </p>
+              <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: '#F3F4F6' }}>
+                <div className="h-2 rounded-full" style={{ width: `${cov.coveragePercent}%`, background: color }} />
+              </div>
+              <span className="text-xs font-black w-10 text-right shrink-0" style={{ color }}>
+                {cov.coveragePercent}%
+              </span>
+              <span className="text-xs w-20 text-right shrink-0" style={{ color: '#9CA3AF' }}>
+                {cov.coveredTopics}/{cov.totalTopics} topics
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

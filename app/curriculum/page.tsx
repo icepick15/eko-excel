@@ -475,53 +475,124 @@ function DistrictView({ districtId }: { districtId: string }) {
 
 // ── Ministry view ────────────────────────────────────────────────────────────
 function MinistryView() {
-  const [selectedSubject, setSelectedSubject] = useState<string | null>(null);
+  const [selectedSubject,  setSelectedSubject]  = useState<string | null>(null);
+  const [selectedDistrict, setSelectedDistrict] = useState<string | null>(null);
+
   const coverage  = getStateSubjectCoverage();
   const districts = districtStore.getAll();
 
-  const drillData = selectedSubject
-    ? districts.map((d) => ({
-        d,
-        cov: getDistrictSubjectCoverage(d.id).find((c) => c.subject === selectedSubject)!,
-      }))
+  const districtDrill = selectedSubject
+    ? districts
+        .map((d) => ({
+          d,
+          cov: getDistrictSubjectCoverage(d.id).find((c) => c.subject === selectedSubject)!,
+        }))
+        .sort((a, b) => a.cov.coveragePercent - b.cov.coveragePercent)
     : [];
+
+  const schoolDrill = selectedSubject && selectedDistrict
+    ? schoolStore.getByDistrict(selectedDistrict)
+        .map((sc) => ({
+          sc,
+          cov: getSchoolSubjectCoverage(sc.id).find((c) => c.subject === selectedSubject)!,
+        }))
+        .sort((a, b) => a.cov.coveragePercent - b.cov.coveragePercent)
+    : [];
+
+  function handleSubjectClick(subject: string) {
+    setSelectedDistrict(null);
+    setSelectedSubject(subject === selectedSubject ? null : subject);
+  }
+
+  function handleDistrictClick(districtId: string) {
+    setSelectedDistrict(districtId === selectedDistrict ? null : districtId);
+  }
+
+  const activeDistrict = districts.find((d) => d.id === selectedDistrict);
 
   return (
     <div>
+      {/* Subject cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
         {coverage.map((cov) => (
           <SubjectCard
             key={cov.subject}
             cov={cov}
-            onClick={() => setSelectedSubject(cov.subject === selectedSubject ? null : cov.subject)}
+            onClick={() => handleSubjectClick(cov.subject)}
           />
         ))}
       </div>
 
-      {selectedSubject && drillData.length > 0 && (
-        <div className="rounded-2xl p-4" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
+      {/* District drill-down */}
+      {selectedSubject && districtDrill.length > 0 && (
+        <div className="rounded-2xl p-4 mb-4" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
           <div className="flex items-center justify-between mb-3">
             <p className="font-bold text-sm" style={{ color: '#0033A0' }}>
               {SUBJECT_EMOJI[selectedSubject] ?? '📚'} {selectedSubject} — By District
             </p>
-            <button onClick={() => setSelectedSubject(null)} className="text-xs" style={{ color: '#9CA3AF' }}>Close ×</button>
+            <button
+              onClick={() => { setSelectedSubject(null); setSelectedDistrict(null); }}
+              className="text-xs"
+              style={{ color: '#9CA3AF' }}
+            >
+              Close ×
+            </button>
           </div>
           <div className="flex flex-col gap-3">
-            {drillData
-              .sort((a, b) => a.cov.coveragePercent - b.cov.coveragePercent)
-              .map(({ d, cov }) => (
-                <div key={d.id} className="flex items-center gap-3">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold truncate" style={{ color: '#374151' }}>
-                      {d.name.split('(')[0].trim()}
-                    </p>
-                    <CoverageBar pct={cov.coveragePercent} height={6} />
+            {districtDrill.map(({ d, cov }) => {
+              const isActive = selectedDistrict === d.id;
+              return (
+                <button
+                  key={d.id}
+                  onClick={() => handleDistrictClick(d.id)}
+                  className="w-full text-left"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between mb-0.5">
+                        <p className="text-xs font-semibold truncate" style={{ color: isActive ? '#0033A0' : '#374151' }}>
+                          {d.name.split('(')[0].trim()}
+                        </p>
+                        <span className="text-xs ml-2 shrink-0" style={{ color: '#9CA3AF' }}>
+                          {isActive ? '▼ Schools' : '▶ Schools'}
+                        </span>
+                      </div>
+                      <CoverageBar pct={cov.coveragePercent} height={6} />
+                    </div>
+                    <span className="text-xs font-black w-10 text-right shrink-0"
+                      style={{ color: scoreColor(cov.coveragePercent) }}>
+                      {cov.coveragePercent}%
+                    </span>
                   </div>
-                  <span className="text-xs font-black w-10 text-right shrink-0" style={{ color: scoreColor(cov.coveragePercent) }}>
-                    {cov.coveragePercent}%
-                  </span>
-                </div>
-              ))}
+
+                  {/* Inline school expansion */}
+                  {isActive && schoolDrill.length > 0 && (
+                    <div className="mt-2 ml-4 flex flex-col gap-2">
+                      {schoolDrill.map(({ sc, cov: scCov }) => (
+                        <div key={sc.id} className="flex items-center gap-3 p-2 rounded-xl"
+                          style={{ background: '#F9FAFB', border: '1px solid #E5E7EB' }}>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold truncate" style={{ color: '#374151' }}>
+                              {sc.name.split(',')[0]}
+                            </p>
+                            <CoverageBar pct={scCov?.coveragePercent ?? 0} height={5} />
+                          </div>
+                          <div className="text-right shrink-0">
+                            <span className="text-xs font-black"
+                              style={{ color: scoreColor(scCov?.coveragePercent ?? 0) }}>
+                              {scCov?.coveragePercent ?? 0}%
+                            </span>
+                            <p className="text-xs" style={{ color: '#9CA3AF' }}>
+                              {scCov?.coveredTopics ?? 0}/{scCov?.totalTopics ?? 0}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}

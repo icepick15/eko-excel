@@ -390,7 +390,7 @@ export default function TeacherDashboard() {
           <QuickNav icon="✉️" label="Messages"      badge={unreadMsgs}            onClick={() => router.push('/messages')} />
           <QuickNav icon="🔥" label="Hotspots"      badge={hotspotCount}          onClick={() => router.push('/hotspots')} />
           <QuickNav icon="📋" label="Tasks"         badge={myInterventions.length} onClick={() => router.push('/interventions')} />
-          <QuickNav icon="📊" label="School"        badge={0}                     onClick={() => router.push('/school')} />
+          <QuickNav icon="📊" label="Scores"        badge={0}                     onClick={() => router.push('/broadsheet')} />
         </div>
       </main>
     </div>
