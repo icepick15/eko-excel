@@ -70,7 +70,12 @@ export default function StudentProfilePage() {
     const c = classStore.getById(s.classId);
     setCls(c ?? null);
 
-    recomputeStudent(studentId);
+    // Only recompute if no metrics exist yet, or they weren't computed today
+    const existingMetrics = metricsStore.getByStudent(studentId);
+    const today = new Date().toISOString().slice(0, 10);
+    if (existingMetrics.length === 0 || existingMetrics[0].computedAt.slice(0, 10) !== today) {
+      recomputeStudent(studentId);
+    }
 
     setMetrics(metricsStore.getByStudent(studentId));
     setBrainMap(brainMapStore.getByStudent(studentId) ?? null);

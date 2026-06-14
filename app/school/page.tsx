@@ -26,14 +26,22 @@ function SchoolContent() {
   const params = useSearchParams();
   const paramId = params.get('id');
 
-  const [students,   setStudents]   = useState<Student[]>([]);
-  const [classes,    setClasses]    = useState<Class[]>([]);
-  const [teachers,   setTeachers]   = useState<User[]>([]);
-  const [schoolName, setSchoolName] = useState('');
-  const [schoolAvg,  setSchoolAvg]  = useState(0);
-  const [activeTab,  setActiveTab]  = useState<Tab>('overview');
-  const [search,     setSearch]     = useState('');
-  const [nudging,    setNudging]    = useState<string | null>(null);
+  const [students,       setStudents]       = useState<Student[]>([]);
+  const [classes,        setClasses]        = useState<Class[]>([]);
+  const [teachers,       setTeachers]       = useState<User[]>([]);
+  const [schoolName,     setSchoolName]     = useState('');
+  const [schoolAvg,      setSchoolAvg]      = useState(0);
+  const [activeTab,      setActiveTab]      = useState<Tab>('overview');
+  const [search,         setSearch]         = useState('');
+  const [nudging,        setNudging]        = useState<string | null>(null);
+  // Precomputed in useEffect — no localStorage reads on re-render
+  const [atRisk,         setAtRisk]         = useState(0);
+  const [hotspotCount,   setHotspotCount]   = useState(0);
+  const [topHotspots,    setTopHotspots]    = useState<import('@/lib/types').Hotspot[]>([]);
+  const [teacherStats,   setTeacherStats]   = useState<{ teacher: User; compliance: { submitted: number; required: number; rate: number }; tcs: import('@/lib/types').TeacherClassSubject[] }[]>([]);
+  const [heatmapData,    setHeatmapData]    = useState<{ subject: string; classes: { cls: Class; avg: number }[] }[]>([]);
+  const [studentAvgMap,  setStudentAvgMap]  = useState<Map<string, number>>(new Map());
+  const [compliantCount, setCompliantCount] = useState(0);
 
   const viewSchoolId = paramId ?? user?.schoolId ?? '';
 
@@ -49,7 +57,6 @@ function SchoolContent() {
       else router.replace('/dashboard');
       return;
     }
-    // District/Ministry without an explicit id param go back to their own dashboard
     if (viewerRoles.includes(user.role) && !paramId) {
       router.replace(user.role === Role.DISTRICT ? '/district' : '/ministry');
       return;
@@ -59,12 +66,64 @@ function SchoolContent() {
     const school = schoolStore.getById(sId);
     setSchoolName(school?.name ?? 'School');
 
-    setStudents(studentStore.getBySchool(sId));
-    setClasses(classStore.getBySchool(sId));
-    setTeachers(userStore.getTeachers(sId));
+    const studs   = studentStore.getBySchool(sId);
+    const clsList = classStore.getBySchool(sId);
+    const tchrs   = userStore.getTeachers(sId);
+    setStudents(studs);
+    setClasses(clsList);
+    setTeachers(tchrs);
     setSchoolAvg(getSchoolReadinessAvg(sId));
 
-    // Generate proactive alerts for school-level roles
+    // Precompute per-student averages once — used for sort + at-risk count
+    const avgMap = new Map<string, number>();
+    let atRiskCnt = 0;
+    for (const s of studs) {
+      const ms = metricsStore.getByStudent(s.id);
+      const avg = ms.length > 0 ? Math.round(ms.reduce((a, m) => a + m.readinessScore, 0) / ms.length) : 0;
+      avgMap.set(s.id, avg);
+      if (ms.some((m) => m.colorStatus === ColorStatus.RED)) atRiskCnt++;
+    }
+    setStudentAvgMap(avgMap);
+    setAtRisk(atRiskCnt);
+
+    // Hotspots — one read, deduped for overview card
+    const schoolHotspots = hotspotStore.getBySchool(sId);
+    setHotspotCount(schoolHotspots.length);
+    const top = [...schoolHotspots]
+      .sort((a, b) => a.readinessScore - b.readinessScore)
+      .filter((h, i, arr) => arr.findIndex((x) => x.studentId === h.studentId) === i)
+      .slice(0, 5);
+    setTopHotspots(top);
+
+    // Teacher stats — one compliance read per teacher
+    const stats = tchrs.map((t) => ({
+      teacher: t,
+      compliance: getTeacherComplianceThisWeek(t.id),
+      tcs: tcsStore.getByTeacher(t.id),
+    }));
+    setTeacherStats(stats);
+    setCompliantCount(stats.filter((s) => s.compliance.rate >= 90).length);
+
+    // Heatmap — one metrics read per student (already in avgMap; reuse per-subject)
+    const allMetrics = metricsStore.getAll();
+    const metricsByStudent = new Map<string, typeof allMetrics>();
+    for (const m of allMetrics) {
+      if (!metricsByStudent.has(m.studentId)) metricsByStudent.set(m.studentId, []);
+      metricsByStudent.get(m.studentId)!.push(m);
+    }
+    const hmap = CORE_SUBJECTS.map((subject) => ({
+      subject,
+      classes: clsList.map((cls) => {
+        const classStudents = studentStore.getByClass(cls.id);
+        if (classStudents.length === 0) return { cls, avg: 0 };
+        const scores = classStudents.map((s) =>
+          (metricsByStudent.get(s.id) ?? []).find((m) => m.subject === subject)?.readinessScore ?? 0
+        );
+        return { cls, avg: Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) };
+      }),
+    }));
+    setHeatmapData(hmap);
+
     if (!viewerRoles.includes(user.role)) generateAlerts(user);
   }, [user, isLoading, router, viewSchoolId, paramId]);
 
@@ -72,22 +131,11 @@ function SchoolContent() {
   if (!user) return null;
 
   const schoolId = viewSchoolId;
-  const atRisk  = students.filter((s) => metricsStore.getByStudent(s.id).some((m) => m.colorStatus === ColorStatus.RED)).length;
-  const onTrack = students.filter((s) => metricsStore.getByStudent(s.id).every((m) => m.colorStatus !== ColorStatus.RED)).length;
-  const schoolHotspots = hotspotStore.getBySchool(schoolId);
-  const hotspotCount = schoolHotspots.length;
-  // Worst hotspot per student — five distinct students for the overview card
-  const topHotspots = [...schoolHotspots]
-    .sort((a, b) => a.readinessScore - b.readinessScore)
-    .filter((h, i, arr) => arr.findIndex((x) => x.studentId === h.studentId) === i)
-    .slice(0, 5);
 
-  // Teacher compliance
-  const teacherStats = teachers.map((t) => ({
-    teacher: t,
-    compliance: getTeacherComplianceThisWeek(t.id),
-    tcs: tcsStore.getByTeacher(t.id),
-  }));
+  // Filtered + sorted students — cheap now that averages are precomputed
+  const filteredStudents = students
+    .filter((s) => !search || s.name.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => (studentAvgMap.get(a.id) ?? 0) - (studentAvgMap.get(b.id) ?? 0));
 
   function sendNudge(teacherId: string, teacherName: string) {
     if (!user) return;
@@ -107,27 +155,6 @@ function SchoolContent() {
     setTimeout(() => setNudging(null), 800);
     alert(`Nudge sent to ${teacherName}`);
   }
-
-  // Subject × Class heatmap data
-  const heatmapData = CORE_SUBJECTS.map((subject) => ({
-    subject,
-    classes: classes.map((cls) => {
-      const classStudents = studentStore.getByClass(cls.id);
-      if (classStudents.length === 0) return { cls, avg: 0 };
-      const scores = classStudents
-        .map((s) => metricsStore.getByStudent(s.id).find((m) => m.subject === subject)?.readinessScore ?? 0);
-      const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
-      return { cls, avg: Math.round(avg) };
-    }),
-  }));
-
-  const filteredStudents = students.filter((s) =>
-    !search || s.name.toLowerCase().includes(search.toLowerCase())
-  ).sort((a, b) => {
-    const aAvg = metricsStore.getByStudent(a.id).reduce((s, m) => s + m.readinessScore, 0) / (metricsStore.getByStudent(a.id).length || 1);
-    const bAvg = metricsStore.getByStudent(b.id).reduce((s, m) => s + m.readinessScore, 0) / (metricsStore.getByStudent(b.id).length || 1);
-    return aAvg - bAvg; // worst first
-  });
 
   const TAB_LABELS: Record<Tab, string> = {
     overview: 'Overview',
@@ -156,8 +183,7 @@ function SchoolContent() {
           <KPICard value={`${schoolAvg}%`}  label="School Avg"   color={scoreColor(schoolAvg)} />
           <KPICard value={String(atRisk)}    label="At-Risk"      color={atRisk > 0 ? '#E30613' : '#008751'} />
           <KPICard value={String(hotspotCount)} label="Hotspots"  color={hotspotCount > 0 ? '#E30613' : '#008751'} />
-          <KPICard value={String(teachers.filter((t) => getTeacherComplianceThisWeek(t.id).rate >= 90).length) + '/' + teachers.length}
-            label="Compliant" color="#0033A0" />
+          <KPICard value={`${compliantCount}/${teachers.length}`} label="Compliant" color="#0033A0" />
         </div>
 
         {/* Tabs */}
@@ -437,8 +463,7 @@ function SchoolContent() {
             />
             <div className="flex flex-col gap-2">
               {filteredStudents.map((s) => {
-                const ms  = metricsStore.getByStudent(s.id);
-                const avg = ms.length > 0 ? Math.round(ms.reduce((a, m) => a + m.readinessScore, 0) / ms.length) : 0;
+                const avg = studentAvgMap.get(s.id) ?? 0;
                 const col = scoreColor(avg);
                 const cls = classStore.getById(s.classId);
                 const hs  = hotspotStore.getByStudent(s.id).length;

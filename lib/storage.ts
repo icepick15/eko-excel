@@ -46,15 +46,30 @@ const K = {
 // Flags written by older seed versions — removed on reset so everything re-seeds
 const LEGACY_KEYS = ['eko_seeded_v4', 'eko_seeded_multi_v1', 'eko_questions_v2'];
 
+// ============= In-memory read cache =============
+// Eliminates redundant JSON.parse calls — every store read hits memory after the first load.
+// Cache is invalidated on every write via set(), so it stays consistent within a tab session.
+const _cache = new Map<string, unknown[]>();
+
+export function bustCache(key?: string): void {
+  if (key) _cache.delete(key);
+  else _cache.clear();
+}
+
 // ============= Generic helpers =============
 function get<T>(key: string): T[] {
   if (typeof window === 'undefined') return [];
-  try { return JSON.parse(localStorage.getItem(key) || '[]') as T[]; }
-  catch { return []; }
+  if (_cache.has(key)) return _cache.get(key) as T[];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || '[]') as T[];
+    _cache.set(key, parsed as unknown[]);
+    return parsed;
+  } catch { return []; }
 }
 
 function set<T>(key: string, data: T[]): void {
   if (typeof window === 'undefined') return;
+  _cache.set(key, data as unknown[]);
   localStorage.setItem(key, JSON.stringify(data));
 }
 
@@ -508,12 +523,14 @@ export const seedStore = {
   markSeeded: () => { if (typeof window !== 'undefined') localStorage.setItem(K.seeded, 'true'); },
   reset:      () => {
     if (typeof window === 'undefined') return;
+    bustCache();
     Object.values(K).forEach((k) => localStorage.removeItem(k));
     LEGACY_KEYS.forEach((k) => localStorage.removeItem(k));
   },
   // Wipe all data (keeping the logged-in session) so a new seed version starts clean
   resetData:  () => {
     if (typeof window === 'undefined') return;
+    bustCache();
     Object.values(K).forEach((k) => { if (k !== K.currentUser) localStorage.removeItem(k); });
     LEGACY_KEYS.forEach((k) => localStorage.removeItem(k));
   },

@@ -7,6 +7,7 @@ import {
   diaryStore, topicStore, metricsStore, snapshotStore,
   brainMapStore, hotspotStore, quizAttemptStore, careerStore,
   studentStore, attendanceStore, classStore, schoolStore, districtStore,
+  tcsStore,
 } from './storage';
 
 function uid(): string {
@@ -382,11 +383,7 @@ export function getTeacherComplianceThisWeek(teacherId: string): { submitted: nu
   const today = new Date();
   const schoolDays = Math.min(5, Math.ceil((today.getTime() - monday.getTime()) / 86400000));
 
-  const tcsEntries = (typeof window !== 'undefined'
-    ? JSON.parse(localStorage.getItem('eko_teacher_class_subj') || '[]')
-    : []) as Array<{ teacherId: string; classId: string; subject: string }>;
-
-  const myClasses = tcsEntries.filter((t) => t.teacherId === teacherId);
+  const myClasses = tcsStore.getByTeacher(teacherId);
   const required = myClasses.length * schoolDays;
   if (required === 0) return { submitted: 0, required: 0, rate: 0 };
 

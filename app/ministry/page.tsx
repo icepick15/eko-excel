@@ -3,10 +3,10 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
-import { Role, ColorStatus, CORE_SUBJECTS } from '@/lib/types';
+import { Role, CORE_SUBJECTS } from '@/lib/types';
 import type { District, School, Student } from '@/lib/types';
 import { districtStore, schoolStore, studentStore, metricsStore, hotspotStore } from '@/lib/storage';
-import { getSchoolReadinessAvg, scoreColor, scoreBg, SCORE_GREEN, SCORE_YELLOW, getStateTrend, getDistrictTrend, getStateSubjectCoverage } from '@/lib/calculations';
+import { scoreColor, SCORE_GREEN, SCORE_YELLOW, getStateTrend, getDistrictTrend, getStateSubjectCoverage } from '@/lib/calculations';
 import { generateAlerts } from '@/lib/alerts';
 import TrendChart from '@/components/TrendChart';
 import Navbar from '@/components/Navbar';
@@ -24,59 +24,124 @@ export default function MinistryDashboard() {
   const { user, isLoading } = useAuth();
   const router = useRouter();
 
-  const [districts,   setDistricts]   = useState<District[]>([]);
-  const [allStudents, setAllStudents] = useState<Student[]>([]);
-  const [allSchools,  setAllSchools]  = useState<School[]>([]);
+  const [districts,      setDistricts]      = useState<District[]>([]);
+  const [allStudents,    setAllStudents]     = useState<Student[]>([]);
+  const [allSchools,     setAllSchools]      = useState<School[]>([]);
+  // Precomputed in useEffect — never recalculated on re-render
+  const [stateAvg,       setStateAvg]        = useState(0);
+  const [greenCnt,       setGreenCnt]        = useState(0);
+  const [yellowCnt,      setYellowCnt]       = useState(0);
+  const [redCnt,         setRedCnt]          = useState(0);
+  const [totalHs,        setTotalHs]         = useState(0);
+  const [maleAvg,        setMaleAvg]         = useState(0);
+  const [femaleAvg,      setFemaleAvg]       = useState(0);
+  const [subjectRanking, setSubjectRanking]  = useState<{ subject: string; avg: number }[]>([]);
+  const [districtStats,  setDistrictStats]   = useState<{ d: District; avg: number; studs: Student[]; hs: number }[]>([]);
+  const [heatmapRows,    setHeatmapRows]     = useState<{ d: District; subjectAvgs: Record<string, number>; overall: number }[]>([]);
+  const [criticalHotspots, setCriticalHotspots] = useState<{ h: import('@/lib/types').Hotspot; s: Student }[]>([]);
 
   useEffect(() => {
     if (isLoading) return;
     if (!user) { router.replace('/login'); return; }
     if (user.role !== Role.MINISTRY) { router.replace('/dashboard'); return; }
 
-    setDistricts(districtStore.getAll());
-    setAllStudents(studentStore.getAll().filter((s) => s.isActive !== false));
-    setAllSchools(schoolStore.getAll());
+    const dists    = districtStore.getAll();
+    const studs    = studentStore.getAll().filter((s) => s.isActive !== false);
+    const schools  = schoolStore.getAll();
+    setDistricts(dists);
+    setAllStudents(studs);
+    setAllSchools(schools);
+
+    // Load all metrics once — build lookup maps from it
+    const allMetrics = metricsStore.getAll();
+    const allHotspots = hotspotStore.getAll().filter((h) => !h.resolvedAt && !!h.subject);
+
+    // Per-student overall avg and per-subject avg — computed from the single allMetrics read
+    const studentOverallAvg = new Map<string, number>();
+    const studentSubjectAvg = new Map<string, Map<string, number>>();
+    for (const s of studs) {
+      const ms = allMetrics.filter((m) => m.studentId === s.id);
+      const overall = ms.length > 0 ? Math.round(ms.reduce((a, m) => a + m.readinessScore, 0) / ms.length) : 0;
+      studentOverallAvg.set(s.id, overall);
+      const bySubj = new Map<string, number>();
+      for (const m of ms) bySubj.set(m.subject, m.readinessScore);
+      studentSubjectAvg.set(s.id, bySubj);
+    }
+
+    // State-level KPIs
+    const avgs = studs.map((s) => studentOverallAvg.get(s.id) ?? 0);
+    const sAvg = avgs.length > 0 ? Math.round(avgs.reduce((a, b) => a + b, 0) / avgs.length) : 0;
+    setStateAvg(sAvg);
+    setGreenCnt(avgs.filter((a) => a >= SCORE_GREEN).length);
+    setYellowCnt(avgs.filter((a) => a >= SCORE_YELLOW && a < SCORE_GREEN).length);
+    setRedCnt(avgs.filter((a) => a < SCORE_YELLOW).length);
+
+    // Hotspot count (already filtered above)
+    const studentIdSet = new Set(studs.map((s) => s.id));
+    const myHotspots = allHotspots.filter((h) => studentIdSet.has(h.studentId));
+    setTotalHs(myHotspots.length);
+
+    // Gender equity
+    const mStuDs = studs.filter((s) => s.gender === 'M');
+    const fStuds  = studs.filter((s) => s.gender === 'F');
+    setMaleAvg(mStuDs.length > 0 ? Math.round(mStuDs.map((s) => studentOverallAvg.get(s.id) ?? 0).reduce((a, b) => a + b, 0) / mStuDs.length) : 0);
+    setFemaleAvg(fStuds.length > 0 ? Math.round(fStuds.map((s) => studentOverallAvg.get(s.id) ?? 0).reduce((a, b) => a + b, 0) / fStuds.length) : 0);
+
+    // Subject ranking
+    const ranking = CORE_SUBJECTS.map((subject) => {
+      const vals = studs.map((s) => studentSubjectAvg.get(s.id)?.get(subject) ?? 0);
+      return { subject, avg: vals.length > 0 ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 0 };
+    }).sort((a, b) => b.avg - a.avg);
+    setSubjectRanking(ranking);
+
+    // District stats + heatmap — all derived from the same maps
+    const schoolsByDistrict = new Map<string, School[]>();
+    for (const sc of schools) {
+      if (!schoolsByDistrict.has(sc.districtId)) schoolsByDistrict.set(sc.districtId, []);
+      schoolsByDistrict.get(sc.districtId)!.push(sc);
+    }
+    const studentsBySchool = new Map<string, Student[]>();
+    for (const s of studs) {
+      if (!studentsBySchool.has(s.schoolId)) studentsBySchool.set(s.schoolId, []);
+      studentsBySchool.get(s.schoolId)!.push(s);
+    }
+    const hotspotsByStudent = new Map<string, number>();
+    for (const h of myHotspots) hotspotsByStudent.set(h.studentId, (hotspotsByStudent.get(h.studentId) ?? 0) + 1);
+
+    const dStats = dists.map((d) => {
+      const dSchools = schoolsByDistrict.get(d.id) ?? [];
+      const dStuds   = dSchools.flatMap((sc) => studentsBySchool.get(sc.id) ?? []);
+      const dAvg     = dStuds.length > 0 ? Math.round(dStuds.map((s) => studentOverallAvg.get(s.id) ?? 0).reduce((a, b) => a + b, 0) / dStuds.length) : 0;
+      const dHs      = dStuds.reduce((a, s) => a + (hotspotsByStudent.get(s.id) ?? 0), 0);
+      return { d, avg: dAvg, studs: dStuds, hs: dHs };
+    }).sort((a, b) => b.avg - a.avg);
+    setDistrictStats(dStats);
+
+    const hmap = dists.map((d) => {
+      const dSchools = schoolsByDistrict.get(d.id) ?? [];
+      const dStuds   = dSchools.flatMap((sc) => studentsBySchool.get(sc.id) ?? []);
+      const subjectAvgs: Record<string, number> = {};
+      for (const subject of CORE_SUBJECTS) {
+        const vals = dStuds.map((s) => studentSubjectAvg.get(s.id)?.get(subject) ?? 0);
+        subjectAvgs[subject] = vals.length > 0 ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
+      }
+      const overall = dStuds.length > 0 ? Math.round(dStuds.map((s) => studentOverallAvg.get(s.id) ?? 0).reduce((a, b) => a + b, 0) / dStuds.length) : 0;
+      return { d, subjectAvgs, overall };
+    });
+    setHeatmapRows(hmap);
+
+    // Critical hotspots (severity=critical) for the alerts section
+    const criticals = myHotspots
+      .filter((h) => h.severity === 'critical')
+      .slice(0, 8)
+      .map((h) => ({ h, s: studs.find((s) => s.id === h.studentId)! }))
+      .filter((x) => !!x.s);
+    setCriticalHotspots(criticals);
 
     generateAlerts(user);
   }, [user, isLoading, router]);
 
-  function getStudentAvg(studentId: string, subject?: string): number {
-    const ms = metricsStore.getByStudent(studentId);
-    const filtered = subject ? ms.filter((m) => m.subject === subject) : ms;
-    if (filtered.length === 0) return 0;
-    return Math.round(filtered.reduce((a, m) => a + m.readinessScore, 0) / filtered.length);
-  }
-
-  function districtAvg(districtId: string, subject?: string): number {
-    const studs = studentStore.getByDistrict(districtId);
-    if (studs.length === 0) return 0;
-    return Math.round(studs.reduce((a, s) => a + getStudentAvg(s.id, subject), 0) / studs.length);
-  }
-
-  const stateAvg = allStudents.length > 0
-    ? Math.round(allStudents.reduce((a, s) => a + getStudentAvg(s.id), 0) / allStudents.length)
-    : 0;
-
-  const greenCnt = allStudents.filter((s) => getStudentAvg(s.id) >= SCORE_GREEN).length;
-  const yellowCnt= allStudents.filter((s) => { const a = getStudentAvg(s.id); return a >= SCORE_YELLOW && a < SCORE_GREEN; }).length;
-  const redCnt   = allStudents.filter((s) => getStudentAvg(s.id) < SCORE_YELLOW).length;
-  const totalHs  = allStudents.reduce((a, s) => a + hotspotStore.getByStudent(s.id).length, 0);
-
   const stateColor = scoreColor(stateAvg);
-
-  // Gender equity
-  const maleStudents   = allStudents.filter((s) => s.gender === 'M');
-  const femaleStudents = allStudents.filter((s) => s.gender === 'F');
-  const maleAvg   = maleStudents.length > 0 ? Math.round(maleStudents.reduce((a, s) => a + getStudentAvg(s.id), 0) / maleStudents.length) : 0;
-  const femaleAvg = femaleStudents.length > 0 ? Math.round(femaleStudents.reduce((a, s) => a + getStudentAvg(s.id), 0) / femaleStudents.length) : 0;
-
-  // Subject ranking (state-wide avg per subject)
-  const subjectRanking = CORE_SUBJECTS.map((subject) => ({
-    subject,
-    avg: allStudents.length > 0
-      ? Math.round(allStudents.reduce((a, s) => a + getStudentAvg(s.id, subject), 0) / allStudents.length)
-      : 0,
-  })).sort((a, b) => b.avg - a.avg);
 
   if (isLoading) return null;
 
@@ -140,43 +205,40 @@ export default function MinistryDashboard() {
         <div className="rounded-2xl p-4 mb-5" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
           <h2 className="font-bold text-sm mb-3" style={{ color: '#0033A0' }}>District Readiness</h2>
           <div className="flex flex-col gap-3">
-            {districts
-              .map((d) => ({ d, avg: districtAvg(d.id), studs: studentStore.getByDistrict(d.id), hs: hotspotStore.getByDistrict(d.id).length }))
-              .sort((a, b) => b.avg - a.avg)
-              .map(({ d, avg, studs, hs }, rank) => {
-                const color = scoreColor(avg);
-                return (
-                  <button
-                    key={d.id}
-                    onClick={() => router.push(`/district?id=${d.id}`)}
-                    className="flex items-center gap-3 w-full text-left"
+            {districtStats.map(({ d, avg, studs, hs }, rank) => {
+              const color = scoreColor(avg);
+              return (
+                <button
+                  key={d.id}
+                  onClick={() => router.push(`/district?id=${d.id}`)}
+                  className="flex items-center gap-3 w-full text-left"
+                >
+                  <div
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-black shrink-0"
+                    style={{ background: rank === 0 ? '#DCFCE7' : rank === districtStats.length - 1 ? '#FEE2E2' : '#F3F4F6', color: rank === 0 ? '#008751' : rank === districtStats.length - 1 ? '#E30613' : '#6B7280' }}
                   >
-                    <div
-                      className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-black shrink-0"
-                      style={{ background: rank === 0 ? '#DCFCE7' : rank === districts.length - 1 ? '#FEE2E2' : '#F3F4F6', color: rank === 0 ? '#008751' : rank === districts.length - 1 ? '#E30613' : '#6B7280' }}
-                    >
-                      #{rank + 1}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold truncate" style={{ color: '#374151' }}>
-                        {d.name.split('(')[0].trim()}
-                      </p>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: '#F3F4F6' }}>
-                          <div className="h-2 rounded-full" style={{ width: `${avg}%`, background: color }} />
-                        </div>
+                    #{rank + 1}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold truncate" style={{ color: '#374151' }}>
+                      {d.name.split('(')[0].trim()}
+                    </p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: '#F3F4F6' }}>
+                        <div className="h-2 rounded-full" style={{ width: `${avg}%`, background: color }} />
                       </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-sm font-black" style={{ color }}>{avg}%</p>
-                      <p className="text-xs" style={{ color: '#9CA3AF' }}>
-                        {studs.length}stu {hs > 0 && <span style={{ color: '#E30613' }}>·{hs}🔥</span>}
-                        <span className="ml-1 opacity-40">→</span>
-                      </p>
-                    </div>
-                  </button>
-                );
-              })}
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-sm font-black" style={{ color }}>{avg}%</p>
+                    <p className="text-xs" style={{ color: '#9CA3AF' }}>
+                      {studs.length}stu {hs > 0 && <span style={{ color: '#E30613' }}>·{hs}🔥</span>}
+                      <span className="ml-1 opacity-40">→</span>
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -205,12 +267,12 @@ export default function MinistryDashboard() {
             <div className="rounded-xl p-4 text-center" style={{ background: '#EFF6FF' }}>
               <p className="text-3xl font-black" style={{ color: '#0033A0' }}>{maleAvg}%</p>
               <p className="text-sm font-bold mt-1" style={{ color: '#374151' }}>Male</p>
-              <p className="text-xs" style={{ color: '#9CA3AF' }}>{maleStudents.length} students</p>
+              <p className="text-xs" style={{ color: '#9CA3AF' }}>{allStudents.filter((s) => s.gender === 'M').length} students</p>
             </div>
             <div className="rounded-xl p-4 text-center" style={{ background: '#FDF4FF' }}>
               <p className="text-3xl font-black" style={{ color: '#7C3AED' }}>{femaleAvg}%</p>
               <p className="text-sm font-bold mt-1" style={{ color: '#374151' }}>Female</p>
-              <p className="text-xs" style={{ color: '#9CA3AF' }}>{femaleStudents.length} students</p>
+              <p className="text-xs" style={{ color: '#9CA3AF' }}>{allStudents.filter((s) => s.gender === 'F').length} students</p>
             </div>
           </div>
           {Math.abs(maleAvg - femaleAvg) > 5 && (
@@ -240,39 +302,36 @@ export default function MinistryDashboard() {
                 </tr>
               </thead>
               <tbody>
-                {districts.map((d, ri) => {
-                  const overall = districtAvg(d.id);
-                  return (
-                    <tr key={d.id} style={{ background: ri % 2 === 0 ? 'white' : '#F9FAFB' }}>
-                      <td className="px-3 py-2.5 text-xs font-semibold" style={{ color: '#374151' }}>
-                        {d.name.split('(')[0].trim().split(' ').slice(-1)[0]}
-                      </td>
-                      {CORE_SUBJECTS.map((subject) => {
-                        const avg = districtAvg(d.id, subject);
-                        const bg  = avg >= SCORE_GREEN ? '#DCFCE7' : avg >= SCORE_YELLOW ? '#FEF9C3' : avg > 0 ? '#FEE2E2' : '#F3F4F6';
-                        const col = avg >= SCORE_GREEN ? '#008751' : avg >= SCORE_YELLOW ? '#854D0E' : avg > 0 ? '#E30613' : '#9CA3AF';
-                        return (
-                          <td key={subject} className="px-2 py-2.5 text-center">
-                            <span className="text-xs font-black px-1.5 py-0.5 rounded-full" style={{ background: bg, color: col }}>
-                              {avg > 0 ? `${avg}%` : '—'}
-                            </span>
-                          </td>
-                        );
-                      })}
-                      <td className="px-3 py-2.5 text-center">
-                        <span
-                          className="text-xs font-black px-2 py-0.5 rounded-full"
-                          style={{
-                            background: overall >= SCORE_GREEN ? '#DCFCE7' : overall >= SCORE_YELLOW ? '#FEF9C3' : '#FEE2E2',
-                            color: overall >= SCORE_GREEN ? '#008751' : overall >= SCORE_YELLOW ? '#854D0E' : '#E30613',
-                          }}
-                        >
-                          {overall > 0 ? `${overall}%` : '—'}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {heatmapRows.map(({ d, subjectAvgs, overall }, ri) => (
+                  <tr key={d.id} style={{ background: ri % 2 === 0 ? 'white' : '#F9FAFB' }}>
+                    <td className="px-3 py-2.5 text-xs font-semibold" style={{ color: '#374151' }}>
+                      {d.name.split('(')[0].trim().split(' ').slice(-1)[0]}
+                    </td>
+                    {CORE_SUBJECTS.map((subject) => {
+                      const avg = subjectAvgs[subject] ?? 0;
+                      const bg  = avg >= SCORE_GREEN ? '#DCFCE7' : avg >= SCORE_YELLOW ? '#FEF9C3' : avg > 0 ? '#FEE2E2' : '#F3F4F6';
+                      const col = avg >= SCORE_GREEN ? '#008751' : avg >= SCORE_YELLOW ? '#854D0E' : avg > 0 ? '#E30613' : '#9CA3AF';
+                      return (
+                        <td key={subject} className="px-2 py-2.5 text-center">
+                          <span className="text-xs font-black px-1.5 py-0.5 rounded-full" style={{ background: bg, color: col }}>
+                            {avg > 0 ? `${avg}%` : '—'}
+                          </span>
+                        </td>
+                      );
+                    })}
+                    <td className="px-3 py-2.5 text-center">
+                      <span
+                        className="text-xs font-black px-2 py-0.5 rounded-full"
+                        style={{
+                          background: overall >= SCORE_GREEN ? '#DCFCE7' : overall >= SCORE_YELLOW ? '#FEF9C3' : '#FEE2E2',
+                          color: overall >= SCORE_GREEN ? '#008751' : overall >= SCORE_YELLOW ? '#854D0E' : '#E30613',
+                        }}
+                      >
+                        {overall > 0 ? `${overall}%` : '—'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -320,28 +379,25 @@ export default function MinistryDashboard() {
               Critical Alerts State-Wide ({totalHs})
             </h2>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 items-start">
-              {allStudents
-                .flatMap((s) => hotspotStore.getByStudent(s.id).filter((h) => h.severity === 'critical').map((h) => ({ ...h, s })))
-                .slice(0, 8)
-                .map(({ s, id, subject, readinessScore, studentId }) => {
-                  const school = allSchools.find((sc) => sc.id === s.schoolId);
-                  return (
-                    <button
-                      key={id}
-                      onClick={() => router.push(`/students/${studentId}`)}
-                      className="flex items-start gap-2 p-3 rounded-xl w-full text-left"
-                      style={{ background: '#FEF2F2', border: '1.5px solid #FECACA' }}
-                    >
-                      <span className="text-base">🔴</span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-bold truncate" style={{ color: '#E30613' }}>{s.name}</p>
-                        <p className="text-xs" style={{ color: '#9CA3AF' }}>
-                          {subject} · {(readinessScore ?? 0).toFixed(0)}% · {school?.name?.split(',')[0]}
-                        </p>
-                      </div>
-                    </button>
-                  );
-                })}
+              {criticalHotspots.map(({ h, s }) => {
+                const school = allSchools.find((sc) => sc.id === s.schoolId);
+                return (
+                  <button
+                    key={h.id}
+                    onClick={() => router.push(`/students/${h.studentId}`)}
+                    className="flex items-start gap-2 p-3 rounded-xl w-full text-left"
+                    style={{ background: '#FEF2F2', border: '1.5px solid #FECACA' }}
+                  >
+                    <span className="text-base">🔴</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-bold truncate" style={{ color: '#E30613' }}>{s.name}</p>
+                      <p className="text-xs" style={{ color: '#9CA3AF' }}>
+                        {h.subject} · {(h.readinessScore ?? 0).toFixed(0)}% · {school?.name?.split(',')[0]}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}

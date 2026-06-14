@@ -52,7 +52,12 @@ export default function StudentDashboard() {
     if (!user.studentId) { router.replace('/login'); return; }
 
     const sid = user.studentId;
-    recomputeStudent(sid);
+    // Only recompute if no metrics exist yet, or they weren't computed today
+    const existingMetrics = metricsStore.getByStudent(sid);
+    const today = new Date().toISOString().slice(0, 10);
+    if (existingMetrics.length === 0 || existingMetrics[0].computedAt.slice(0, 10) !== today) {
+      recomputeStudent(sid);
+    }
 
     const s = studentStore.getById(sid);
     setStudent(s ?? null);

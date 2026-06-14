@@ -22,8 +22,17 @@ function saveIfNew(n: Notification): void {
   }
 }
 
+// Throttle map — keyed by userId, stores last-run timestamp
+const _alertsLastRun = new Map<string, number>();
+const ALERTS_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 export function generateAlerts(user: User): void {
   if (typeof window === 'undefined') return;
+
+  const now = Date.now();
+  const lastRun = _alertsLastRun.get(user.id) ?? 0;
+  if (now - lastRun < ALERTS_TTL_MS) return;
+  _alertsLastRun.set(user.id, now);
 
   const today     = new Date().toISOString().slice(0, 10);
   const weekStart = isoWeekStart(new Date());
