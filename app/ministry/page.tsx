@@ -39,6 +39,8 @@ export default function MinistryDashboard() {
   const [districtStats,  setDistrictStats]   = useState<{ d: District; avg: number; studs: Student[]; hs: number }[]>([]);
   const [heatmapRows,    setHeatmapRows]     = useState<{ d: District; subjectAvgs: Record<string, number>; overall: number }[]>([]);
   const [criticalHotspots, setCriticalHotspots] = useState<{ h: import('@/lib/types').Hotspot; s: Student }[]>([]);
+  const [stateTrend,     setStateTrend]     = useState<ReturnType<typeof getStateTrend>>([]);
+  const [districtTrends, setDistrictTrends] = useState<Map<string, ReturnType<typeof getDistrictTrend>>>(new Map());
 
   useEffect(() => {
     if (isLoading) return;
@@ -137,6 +139,12 @@ export default function MinistryDashboard() {
       .map((h) => ({ h, s: studs.find((s) => s.id === h.studentId)! }))
       .filter((x) => !!x.s);
     setCriticalHotspots(criticals);
+
+    // Trend data
+    setStateTrend(getStateTrend());
+    const dTrendsMap = new Map<string, ReturnType<typeof getDistrictTrend>>();
+    for (const d of dists) dTrendsMap.set(d.id, getDistrictTrend(d.id));
+    setDistrictTrends(dTrendsMap);
 
     generateAlerts(user);
   }, [user, isLoading, router]);
@@ -344,12 +352,12 @@ export default function MinistryDashboard() {
         <div className="rounded-2xl p-4 mb-5" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
           <h2 className="font-bold text-sm mb-1" style={{ color: '#0033A0' }}>State Performance Trend (8 weeks)</h2>
           <p className="text-xs mb-3" style={{ color: '#9CA3AF' }}>Weekly average class score across all districts</p>
-          <TrendChart data={getStateTrend()} height={80} />
+          <TrendChart data={stateTrend} height={80} />
 
           {/* Per-district mini trends */}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-4">
             {districts.map((d) => {
-              const tData = getDistrictTrend(d.id);
+              const tData = districtTrends.get(d.id) ?? [];
               const latest = tData.filter((p) => p.score > 0).slice(-1)[0]?.score ?? 0;
               return (
                 <button

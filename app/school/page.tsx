@@ -40,8 +40,10 @@ function SchoolContent() {
   const [topHotspots,    setTopHotspots]    = useState<import('@/lib/types').Hotspot[]>([]);
   const [teacherStats,   setTeacherStats]   = useState<{ teacher: User; compliance: { submitted: number; required: number; rate: number }; tcs: import('@/lib/types').TeacherClassSubject[] }[]>([]);
   const [heatmapData,    setHeatmapData]    = useState<{ subject: string; classes: { cls: Class; avg: number }[] }[]>([]);
-  const [studentAvgMap,  setStudentAvgMap]  = useState<Map<string, number>>(new Map());
-  const [compliantCount, setCompliantCount] = useState(0);
+  const [studentAvgMap,      setStudentAvgMap]      = useState<Map<string, number>>(new Map());
+  const [studentHsMap,       setStudentHsMap]       = useState<Map<string, number>>(new Map());
+  const [classStudentCount,  setClassStudentCount]  = useState<Map<string, number>>(new Map());
+  const [compliantCount,     setCompliantCount]     = useState(0);
 
   const viewSchoolId = paramId ?? user?.schoolId ?? '';
 
@@ -94,6 +96,16 @@ function SchoolContent() {
       .filter((h, i, arr) => arr.findIndex((x) => x.studentId === h.studentId) === i)
       .slice(0, 5);
     setTopHotspots(top);
+
+    // Per-student hotspot count for Students tab rows
+    const hsMap = new Map<string, number>();
+    for (const h of schoolHotspots) hsMap.set(h.studentId, (hsMap.get(h.studentId) ?? 0) + 1);
+    setStudentHsMap(hsMap);
+
+    // Class student count for Overview tab
+    const classCount = new Map<string, number>();
+    for (const s of studs) classCount.set(s.classId, (classCount.get(s.classId) ?? 0) + 1);
+    setClassStudentCount(classCount);
 
     // Teacher stats — one compliance read per teacher
     const stats = tchrs.map((t) => ({
@@ -214,7 +226,6 @@ function SchoolContent() {
                 {classes.map((cls) => {
                   const avg = getClassReadinessAvg(cls.id);
                   const color = scoreColor(avg);
-                  const studs = studentStore.getByClass(cls.id);
                   return (
                     <div key={cls.id} className="flex items-center gap-3">
                       <div className="w-16 text-xs font-bold" style={{ color: '#0033A0' }}>
@@ -224,7 +235,7 @@ function SchoolContent() {
                         <div className="h-3 rounded-full" style={{ width: `${avg}%`, background: color }} />
                       </div>
                       <div className="text-xs font-black w-10 text-right" style={{ color }}>{avg}%</div>
-                      <div className="text-xs w-16 text-right" style={{ color: '#9CA3AF' }}>{studs.length} stu</div>
+                      <div className="text-xs w-16 text-right" style={{ color: '#9CA3AF' }}>{classStudentCount.get(cls.id) ?? 0} stu</div>
                     </div>
                   );
                 })}
@@ -466,7 +477,7 @@ function SchoolContent() {
                 const avg = studentAvgMap.get(s.id) ?? 0;
                 const col = scoreColor(avg);
                 const cls = classStore.getById(s.classId);
-                const hs  = hotspotStore.getByStudent(s.id).length;
+                const hs  = studentHsMap.get(s.id) ?? 0;
                 return (
                   <button
                     key={s.id}

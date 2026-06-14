@@ -51,10 +51,13 @@ export default function HotspotsPage() {
       const classIds = [...new Set(tcs.map((t) => t.classId))];
       const studs = classIds.flatMap((cId) => studentStore.getByClass(cId));
       myStudentIds = new Set(studs.map((s) => s.id));
+    } else if (user.role === Role.DISTRICT) {
+      myStudentIds = new Set(studentStore.getByDistrict(user.districtId ?? '').map((s) => s.id));
+    } else if (user.role === Role.MINISTRY) {
+      myStudentIds = new Set(studentStore.getAll().map((s) => s.id));
     } else {
-      // Headteacher, school admin or other school role — school-wide view
-      const studs = studentStore.getBySchool(user.schoolId ?? '');
-      myStudentIds = new Set(studs.map((s) => s.id));
+      // Headteacher, school admin, or headteacher — school-wide view
+      myStudentIds = new Set(studentStore.getBySchool(user.schoolId ?? '').map((s) => s.id));
     }
 
     const all = hotspotStore.getAll().filter((h) => myStudentIds.has(h.studentId));

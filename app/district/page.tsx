@@ -3,13 +3,13 @@
 import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
-import { Role, ColorStatus, CORE_SUBJECTS } from '@/lib/types';
+import { Role, CORE_SUBJECTS } from '@/lib/types';
 import type { School, Student, Class } from '@/lib/types';
 import {
   schoolStore, studentStore, metricsStore, hotspotStore,
   districtStore, classStore, userStore,
 } from '@/lib/storage';
-import { getSchoolReadinessAvg, getTeacherComplianceThisWeek, getColorStatus, scoreColor, SCORE_GREEN, SCORE_YELLOW, getDistrictTrend, getSchoolTrend } from '@/lib/calculations';
+import { getTeacherComplianceThisWeek, getColorStatus, scoreColor, SCORE_GREEN, SCORE_YELLOW, getDistrictTrend, getSchoolTrend } from '@/lib/calculations';
 import { generateAlerts } from '@/lib/alerts';
 import TrendChart from '@/components/TrendChart';
 import Navbar from '@/components/Navbar';
@@ -28,6 +28,16 @@ function DistrictContent() {
   const [search,       setSearch]       = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'green' | 'yellow' | 'red'>('all');
   const [sortSchool,   setSortSchool]   = useState<SortKey>('readiness');
+  const [districtAvg,     setDistrictAvg]     = useState(0);
+  const [totalHs,         setTotalHs]         = useState(0);
+  const [greenCnt,        setGreenCnt]        = useState(0);
+  const [redCnt,          setRedCnt]          = useState(0);
+  const [schoolStatsList, setSchoolStatsList] = useState<{ school: School; studs: Student[]; avg: number; hs: number; compliance: number }[]>([]);
+  const [heatmapData,     setHeatmapData]     = useState<{ subject: string; schools: { school: School; avg: number }[] }[]>([]);
+  const [studentAvgMap,   setStudentAvgMap]   = useState<Map<string, number>>(new Map());
+  const [studentHsMap,    setStudentHsMap]    = useState<Map<string, number>>(new Map());
+  const [districtTrend,   setDistrictTrend]   = useState<ReturnType<typeof getDistrictTrend>>([]);
+  const [schoolTrends,    setSchoolTrends]    = useState<Map<string, ReturnType<typeof getSchoolTrend>>>(new Map());
 
   const viewDistrictId = paramId ?? user?.districtId ?? '';
 
@@ -40,69 +50,95 @@ function DistrictContent() {
     const district = districtStore.getById(viewDistrictId);
     setDistrictName(district?.name ?? 'District');
 
-    setSchools(schoolStore.getByDistrict(viewDistrictId));
-    setAllStudents(studentStore.getByDistrict(viewDistrictId));
+    const schoolsList = schoolStore.getByDistrict(viewDistrictId);
+    const studsList   = studentStore.getByDistrict(viewDistrictId);
+    setSchools(schoolsList);
+    setAllStudents(studsList);
+
+    // Build per-student avg maps from a single metricsStore read
+    const allMetrics = metricsStore.getAll();
+    const studIdSet  = new Set(studsList.map((s) => s.id));
+
+    const studentOverallAvg = new Map<string, number>();
+    const studentSubjAvg    = new Map<string, Map<string, number>>();
+    for (const s of studsList) {
+      const ms      = allMetrics.filter((m) => m.studentId === s.id);
+      const overall = ms.length > 0 ? Math.round(ms.reduce((a, m) => a + m.readinessScore, 0) / ms.length) : 0;
+      studentOverallAvg.set(s.id, overall);
+      const bySubj = new Map<string, number>();
+      for (const m of ms) bySubj.set(m.subject, m.readinessScore);
+      studentSubjAvg.set(s.id, bySubj);
+    }
+    setStudentAvgMap(studentOverallAvg);
+
+    // Group students by school for O(1) lookup in school stats + heatmap
+    const studentsBySchool = new Map<string, Student[]>();
+    for (const s of studsList) {
+      if (!studentsBySchool.has(s.schoolId)) studentsBySchool.set(s.schoolId, []);
+      studentsBySchool.get(s.schoolId)!.push(s);
+    }
+
+    // Hotspot counts per student
+    const allHotspots  = hotspotStore.getAll().filter((h) => !h.resolvedAt && studIdSet.has(h.studentId));
+    const hsPerStudent = new Map<string, number>();
+    for (const h of allHotspots) hsPerStudent.set(h.studentId, (hsPerStudent.get(h.studentId) ?? 0) + 1);
+    setStudentHsMap(hsPerStudent);
+
+    // District KPIs
+    const avgs = studsList.map((s) => studentOverallAvg.get(s.id) ?? 0);
+    setDistrictAvg(avgs.length > 0 ? Math.round(avgs.reduce((a, b) => a + b, 0) / avgs.length) : 0);
+    setTotalHs(allHotspots.length);
+    setGreenCnt(avgs.filter((a) => a >= SCORE_GREEN).length);
+    setRedCnt(avgs.filter((a) => a < SCORE_YELLOW).length);
+
+    // School-level stats (unsorted — sort happens in render body)
+    setSchoolStatsList(schoolsList.map((school) => {
+      const studs      = studentsBySchool.get(school.id) ?? [];
+      const schoolAvg  = studs.length > 0 ? Math.round(studs.map((s) => studentOverallAvg.get(s.id) ?? 0).reduce((a, b) => a + b, 0) / studs.length) : 0;
+      const hs         = studs.reduce((a, s) => a + (hsPerStudent.get(s.id) ?? 0), 0);
+      const teachers   = userStore.getTeachers(school.id);
+      const compliance = teachers.length > 0
+        ? Math.round(teachers.reduce((a, t) => a + getTeacherComplianceThisWeek(t.id).rate, 0) / teachers.length)
+        : 0;
+      return { school, studs, avg: schoolAvg, hs, compliance };
+    }));
+
+    // Subject × school heatmap
+    setHeatmapData(CORE_SUBJECTS.map((subject) => ({
+      subject,
+      schools: schoolsList.map((sc) => {
+        const sStuds = studentsBySchool.get(sc.id) ?? [];
+        const avg    = sStuds.length > 0
+          ? Math.round(sStuds.map((s) => studentSubjAvg.get(s.id)?.get(subject) ?? 0).reduce((a, b) => a + b, 0) / sStuds.length)
+          : 0;
+        return { school: sc, avg };
+      }),
+    })));
+
+    // Trend data
+    setDistrictTrend(getDistrictTrend(viewDistrictId));
+    const trendsMap = new Map<string, ReturnType<typeof getSchoolTrend>>();
+    for (const sc of schoolsList) trendsMap.set(sc.id, getSchoolTrend(sc.id));
+    setSchoolTrends(trendsMap);
 
     if (user.role === Role.DISTRICT) generateAlerts(user);
   }, [user, isLoading, router, viewDistrictId, paramId]);
 
-  function getStudentAvg(studentId: string, subject?: string): number {
-    const ms = metricsStore.getByStudent(studentId);
-    const filtered = subject ? ms.filter((m) => m.subject === subject) : ms;
-    if (filtered.length === 0) return 0;
-    return Math.round(filtered.reduce((a, m) => a + m.readinessScore, 0) / filtered.length);
-  }
-
-  function getStatus(avg: number): ColorStatus {
-    return getColorStatus(avg);
-  }
-
-  // School-level stats
-  const schoolStats = schools.map((school) => {
-    const studs = studentStore.getBySchool(school.id);
-    const avg = getSchoolReadinessAvg(school.id);
-    const hs  = hotspotStore.getBySchool(school.id).length;
-    const teachers = userStore.getTeachers(school.id);
-    const compliance = teachers.length > 0
-      ? Math.round(teachers.reduce((a, t) => a + getTeacherComplianceThisWeek(t.id).rate, 0) / teachers.length)
-      : 0;
-    return { school, studs, avg, hs, compliance };
-  }).sort((a, b) => {
-    if (sortSchool === 'name')      return a.school.name.localeCompare(b.school.name);
-    if (sortSchool === 'hotspots')  return b.hs - a.hs;
-    return a.avg - b.avg; // lowest readiness first by default
+  // Sort precomputed school stats in render body (cheap — no store reads)
+  const schoolStats = [...schoolStatsList].sort((a, b) => {
+    if (sortSchool === 'name')     return a.school.name.localeCompare(b.school.name);
+    if (sortSchool === 'hotspots') return b.hs - a.hs;
+    return a.avg - b.avg;
   });
 
-  // District totals
-  const districtAvg = allStudents.length > 0
-    ? Math.round(allStudents.reduce((a, s) => a + getStudentAvg(s.id), 0) / allStudents.length)
-    : 0;
-  const totalHs  = allStudents.reduce((a, s) => a + hotspotStore.getByStudent(s.id).length, 0);
-  const greenCnt = allStudents.filter((s) => getStatus(getStudentAvg(s.id)) === ColorStatus.GREEN).length;
-  const redCnt   = allStudents.filter((s) => getStatus(getStudentAvg(s.id)) === ColorStatus.RED).length;
-
-  // Subject heatmap by school
-  const heatmap = CORE_SUBJECTS.map((subject) => ({
-    subject,
-    schools: schools.map((sc) => {
-      const studs = studentStore.getBySchool(sc.id);
-      const avg = studs.length > 0
-        ? Math.round(studs.reduce((a, s) => a + getStudentAvg(s.id, subject), 0) / studs.length)
-        : 0;
-      return { school: sc, avg };
-    }),
-  }));
-
-  // Filtered student list
+  // Filter/sort uses precomputed Maps — no store reads
   const filteredStudents = allStudents
-    .filter((s) => s)
     .filter((s) => !search || s.name.toLowerCase().includes(search.toLowerCase()))
     .filter((s) => {
       if (filterStatus === 'all') return true;
-      const st = getStatus(getStudentAvg(s.id));
-      return st === filterStatus;
+      return getColorStatus(studentAvgMap.get(s.id) ?? 0) === filterStatus;
     })
-    .sort((a, b) => getStudentAvg(a.id) - getStudentAvg(b.id))
+    .sort((a, b) => (studentAvgMap.get(a.id) ?? 0) - (studentAvgMap.get(b.id) ?? 0))
     .slice(0, 40);
 
   if (isLoading) return null;
@@ -201,7 +237,7 @@ function DistrictContent() {
                 </tr>
               </thead>
               <tbody>
-                {heatmap.map(({ subject, schools: schoolData }, ri) => (
+                {heatmapData.map(({ subject, schools: schoolData }, ri) => (
                   <tr key={subject} style={{ background: ri % 2 === 0 ? 'white' : '#F9FAFB' }}>
                     <td className="px-3 py-2 text-xs font-semibold" style={{ color: '#374151', whiteSpace: 'nowrap' }}>
                       {subject}
@@ -229,12 +265,12 @@ function DistrictContent() {
           <div className="rounded-2xl p-4 mb-5" style={{ background: 'white', border: '1.5px solid #E5E7EB' }}>
             <h2 className="font-bold text-sm mb-1" style={{ color: '#0033A0' }}>District Performance Trend (8 weeks)</h2>
             <p className="text-xs mb-3" style={{ color: '#9CA3AF' }}>Weekly average class score across all schools</p>
-            <TrendChart data={getDistrictTrend(viewDistrictId)} height={72} />
+            <TrendChart data={districtTrend} height={72} />
 
             {/* Per-school mini trends */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
               {schools.slice(0, 4).map((sc) => {
-                const tData = getSchoolTrend(sc.id);
+                const tData = schoolTrends.get(sc.id) ?? [];
                 const latest = tData.filter((p) => p.score > 0).slice(-1)[0]?.score ?? 0;
                 return (
                   <div key={sc.id}>
@@ -283,11 +319,11 @@ function DistrictContent() {
 
           <div className="flex flex-col gap-2 max-h-80 overflow-y-auto">
             {filteredStudents.map((s) => {
-              const avg = getStudentAvg(s.id);
+              const avg = studentAvgMap.get(s.id) ?? 0;
               const sc  = schools.find((x) => x.id === s.schoolId);
               const cls = classStore.getById(s.classId);
               const col = scoreColor(avg);
-              const hs  = hotspotStore.getByStudent(s.id).length;
+              const hs  = studentHsMap.get(s.id) ?? 0;
               return (
                 <button
                   key={s.id}

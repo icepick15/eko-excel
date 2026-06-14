@@ -63,6 +63,7 @@ function buildSchoolPerf(schools: School[]): { headers: string[]; rows: (string 
     'Green (≥70%)', 'Yellow (40–69%)', 'Red (<40%)',
     'Active Hotspots', 'Teacher Compliance Avg (%)',
   ];
+  const avgMap = buildStudentAvgMap(schools);
   const rows = schools.map((sc) => {
     const studs      = studentStore.getBySchool(sc.id);
     const avg        = getSchoolReadinessAvg(sc.id);
@@ -70,9 +71,9 @@ function buildSchoolPerf(schools: School[]): { headers: string[]; rows: (string 
     const compliance = teachers.length > 0
       ? Math.round(teachers.reduce((a, t) => a + getTeacherComplianceThisWeek(t.id).rate, 0) / teachers.length)
       : 0;
-    const green  = studs.filter((s) => avgScore(s.id) >= SCORE_GREEN).length;
-    const yellow = studs.filter((s) => { const a = avgScore(s.id); return a >= SCORE_YELLOW && a < SCORE_GREEN; }).length;
-    const red    = studs.filter((s) => avgScore(s.id) < SCORE_YELLOW && avgScore(s.id) > 0).length;
+    const green  = studs.filter((s) => (avgMap.get(s.id) ?? 0) >= SCORE_GREEN).length;
+    const yellow = studs.filter((s) => { const a = avgMap.get(s.id) ?? 0; return a >= SCORE_YELLOW && a < SCORE_GREEN; }).length;
+    const red    = studs.filter((s) => { const a = avgMap.get(s.id) ?? 0; return a < SCORE_YELLOW && a > 0; }).length;
     const hs     = hotspotStore.getBySchool(sc.id).filter((h) => !h.resolvedAt).length;
     const dist   = districtStore.getById(sc.districtId ?? '')?.name ?? '';
     return [sc.name, dist, avg, green, yellow, red, hs, compliance];
@@ -83,12 +84,14 @@ function buildSchoolPerf(schools: School[]): { headers: string[]; rows: (string 
 function buildAtRisk(schools: School[]): { headers: string[]; rows: (string | number)[][] } {
   const headers = ['Student', 'School', 'Class', 'Overall Avg (%)', ...CORE_SUBJECTS];
   const rows: (string | number)[][] = [];
+  const avgMap     = buildStudentAvgMap(schools);
+  const allMetrics = metricsStore.getAll();
   for (const sc of schools) {
     for (const s of studentStore.getBySchool(sc.id)) {
-      const overall = avgScore(s.id);
+      const overall = avgMap.get(s.id) ?? 0;
       if (overall === 0 || overall >= SCORE_YELLOW) continue;
       const cls     = classStore.getById(s.classId);
-      const metrics = metricsStore.getByStudent(s.id);
+      const metrics = allMetrics.filter((m) => m.studentId === s.id);
       const subjectScores = CORE_SUBJECTS.map((subj) => {
         const m = metrics.find((x) => x.subject === subj);
         return m ? Math.round(m.readinessScore) : '—';
@@ -124,10 +127,15 @@ function buildCoverage(schools: School[]): { headers: string[]; rows: (string | 
   return { headers, rows };
 }
 
-function avgScore(studentId: string): number {
-  const ms = metricsStore.getByStudent(studentId);
-  if (ms.length === 0) return 0;
-  return Math.round(ms.reduce((a, m) => a + m.readinessScore, 0) / ms.length);
+function buildStudentAvgMap(schools: School[]): Map<string, number> {
+  const studentIds = new Set(schools.flatMap((sc) => studentStore.getBySchool(sc.id).map((s) => s.id)));
+  const allMetrics = metricsStore.getAll();
+  const avgMap     = new Map<string, number>();
+  for (const sid of studentIds) {
+    const ms = allMetrics.filter((m) => m.studentId === sid);
+    avgMap.set(sid, ms.length > 0 ? Math.round(ms.reduce((a, m) => a + m.readinessScore, 0) / ms.length) : 0);
+  }
+  return avgMap;
 }
 
 // ── component ─────────────────────────────────────────────────────────────────

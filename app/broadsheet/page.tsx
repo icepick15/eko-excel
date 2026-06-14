@@ -17,6 +17,10 @@ export default function BroadsheetPage() {
   const [myClasses, setMyClasses]       = useState<Class[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
   const [classStudents, setClassStudents]     = useState<Student[]>([]);
+  const [diaryAvg,   setDiaryAvg]   = useState<Record<string, number>>({});
+  const [rows,       setRows]       = useState<{ student: Student; scores: Record<string, number | null>; average: number | null }[]>([]);
+  const [subjectAvg, setSubjectAvg] = useState<Record<string, number>>({});
+  const [overallAvg, setOverallAvg] = useState(0);
 
   useEffect(() => {
     if (isLoading) return;
@@ -40,9 +44,57 @@ export default function BroadsheetPage() {
   }, [user, isLoading, router]);
 
   useEffect(() => {
-    if (!selectedClassId) return;
-    setClassStudents(studentStore.getByClass(selectedClassId));
-  }, [selectedClassId]);
+    if (!selectedClassId || myTcs.length === 0) return;
+
+    const students = studentStore.getByClass(selectedClassId);
+    setClassStudents(students);
+
+    const subjects = myTcs.filter((t) => t.classId === selectedClassId).map((t) => t.subject);
+
+    // Diary averages per subject
+    const allDiaries = diaryStore.getByClass(selectedClassId);
+    const dAvg: Record<string, number> = {};
+    for (const subj of subjects) {
+      const entries = allDiaries.filter((d) => d.subject === subj);
+      dAvg[subj] = entries.length > 0 ? Math.round(entries.reduce((a, d) => a + d.classScore, 0) / entries.length) : 0;
+    }
+    setDiaryAvg(dAvg);
+
+    // Build metrics Map from a single metricsStore read
+    const studentIdSet = new Set(students.map((s) => s.id));
+    const allMetrics   = metricsStore.getAll().filter((m) => studentIdSet.has(m.studentId));
+    const metricsMap   = new Map<string, Map<string, number>>();
+    for (const m of allMetrics) {
+      if (!metricsMap.has(m.studentId)) metricsMap.set(m.studentId, new Map());
+      metricsMap.get(m.studentId)!.set(m.subject, m.readinessScore);
+    }
+
+    // Build rows sorted by overall average descending
+    const newRows = students.map((student) => {
+      const scores: Record<string, number | null> = {};
+      for (const subj of subjects) {
+        const score = metricsMap.get(student.id)?.get(subj);
+        scores[subj] = score !== undefined ? score : null;
+      }
+      const valid   = Object.values(scores).filter((s): s is number => s !== null);
+      const average = valid.length > 0 ? Math.round(valid.reduce((a, b) => a + b, 0) / valid.length) : null;
+      return { student, scores, average };
+    }).sort((a, b) => (b.average ?? -1) - (a.average ?? -1));
+    setRows(newRows);
+
+    // Column averages
+    const sAvg: Record<string, number> = {};
+    for (const subj of subjects) {
+      const vals = newRows.map((r) => r.scores[subj]).filter((s): s is number => s !== null);
+      sAvg[subj] = vals.length > 0 ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
+    }
+    setSubjectAvg(sAvg);
+    setOverallAvg(
+      Object.values(sAvg).length > 0
+        ? Math.round(Object.values(sAvg).reduce((a, b) => a + b, 0) / Object.values(sAvg).length)
+        : 0
+    );
+  }, [selectedClassId, myTcs]);
 
   if (isLoading || !user) return null;
 
@@ -51,38 +103,6 @@ export default function BroadsheetPage() {
     .filter((t) => t.classId === selectedClassId)
     .map((t) => t.subject);
 
-  // Diary class-level averages per subject (what the teacher actually taught/scored)
-  const diaryAvg: Record<string, number> = {};
-  if (selectedClassId) {
-    for (const subj of classSubjects) {
-      const entries = diaryStore.getByClass(selectedClassId).filter((d) => d.subject === subj);
-      diaryAvg[subj] = entries.length > 0
-        ? Math.round(entries.reduce((a, d) => a + d.classScore, 0) / entries.length)
-        : 0;
-    }
-  }
-
-  // Build per-student rows, sorted by overall average descending
-  const rows = classStudents.map((student) => {
-    const scores: Record<string, number | null> = {};
-    for (const subj of classSubjects) {
-      const m = metricsStore.getByStudentAndSubject(student.id, subj);
-      scores[subj] = m ? m.readinessScore : null;
-    }
-    const valid = Object.values(scores).filter((s): s is number => s !== null);
-    const average = valid.length > 0 ? Math.round(valid.reduce((a, b) => a + b, 0) / valid.length) : null;
-    return { student, scores, average };
-  }).sort((a, b) => (b.average ?? -1) - (a.average ?? -1));
-
-  // Class-average row (column footers)
-  const subjectAvg: Record<string, number> = {};
-  for (const subj of classSubjects) {
-    const vals = rows.map((r) => r.scores[subj]).filter((s): s is number => s !== null);
-    subjectAvg[subj] = vals.length > 0 ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
-  }
-  const overallAvg = Object.values(subjectAvg).length > 0
-    ? Math.round(Object.values(subjectAvg).reduce((a, b) => a + b, 0) / Object.values(subjectAvg).length)
-    : 0;
 
   return (
     <div className="min-h-screen" style={{ background: '#F5F7FA' }}>

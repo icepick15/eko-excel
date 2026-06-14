@@ -42,7 +42,9 @@ export default function TeacherDashboard() {
   const [myInterventions, setMyInterventions] = useState<Intervention[]>([]);
 
   // students in MY classes
-  const [classStudents, setClassStudents] = useState<Record<string, Student[]>>({});
+  const [classStudents,  setClassStudents]  = useState<Record<string, Student[]>>({});
+  const [atRiskCount,    setAtRiskCount]    = useState(0);
+  const [atRiskStudents, setAtRiskStudents] = useState<{ student: Student; subject: string; score: number; cls: Class | null }[]>([]);
 
   useEffect(() => {
     if (isLoading) return;
@@ -80,10 +82,26 @@ export default function TeacherDashboard() {
     setUnreadMsgs(messageStore.getUnreadCount(user.id));
     setUnreadNotes(notificationStore.getUnread(user.id).length);
 
-    // Hotspots across all my students
-    const allMyStudentIds = classes.flatMap((c) => (byClass[c.id] ?? []).map((s) => s.id));
-    const hCount = allMyStudentIds.reduce((acc, sid) => acc + hotspotStore.getByStudent(sid).length, 0);
-    setHotspotCount(hCount);
+    // Load metrics and hotspots once for this teacher's students
+    const allStudentList = classes.flatMap((c) => byClass[c.id] ?? []);
+    const studentIdSet   = new Set(allStudentList.map((s) => s.id));
+    const allMetrics     = metricsStore.getAll().filter((m) => studentIdSet.has(m.studentId));
+
+    // Hotspot count — one read, no per-student calls
+    setHotspotCount(hotspotStore.getAll().filter((h) => studentIdSet.has(h.studentId)).length);
+
+    // At-risk students — precomputed for render
+    const reds = allStudentList
+      .flatMap((s) => {
+        const ms  = allMetrics.filter((m) => m.studentId === s.id);
+        const red = ms.filter((m) => m.colorStatus === ColorStatus.RED);
+        if (red.length === 0) return [];
+        const worst = red.sort((a, b) => a.readinessScore - b.readinessScore)[0];
+        return [{ student: s, subject: worst.subject, score: Math.round(worst.readinessScore), cls: classStore.getById(s.classId) ?? null }];
+      })
+      .slice(0, 5);
+    setAtRiskCount(reds.length);
+    setAtRiskStudents(reds);
 
     // My assigned interventions (open + in_progress)
     const myTasks = interventionStore.getByTeacher(user.id).filter(
@@ -101,12 +119,6 @@ export default function TeacherDashboard() {
   const school = schoolStore.getById(user.schoolId ?? '');
   const dow = todayDow();
   const totalStudents = Object.values(classStudents).reduce((a, arr) => a + arr.length, 0);
-
-  // At-risk count
-  const atRiskCount = Object.values(classStudents).flat().filter((s) => {
-    const ms = metricsStore.getByStudent(s.id);
-    return ms.some((m) => m.colorStatus === ColorStatus.RED);
-  }).length;
 
   return (
     <div className="min-h-screen" style={{ background: '#F5F7FA' }}>
@@ -258,43 +270,31 @@ export default function TeacherDashboard() {
         {atRiskCount > 0 && (
           <Section title="At-Risk Students" action={{ label: 'All Hotspots', href: '/hotspots' }}>
             <div className="flex flex-col gap-2">
-              {Object.entries(classStudents).flatMap(([, studs]) =>
-                studs.filter((s) => {
-                  const ms = metricsStore.getByStudent(s.id);
-                  return ms.some((m) => m.colorStatus === ColorStatus.RED);
-                }).map((s) => {
-                  const ms = metricsStore.getByStudent(s.id);
-                  const worst = ms.filter((m) => m.colorStatus === ColorStatus.RED)[0];
-                  const cls = classStore.getById(s.classId);
-                  return (
-                    <button
-                      key={s.id}
-                      onClick={() => router.push(`/students/${s.id}`)}
-                      className="flex items-center gap-3 p-3 rounded-xl w-full text-left"
-                      style={{ background: '#FFF5F5', border: '1.5px solid #FECACA' }}
-                    >
-                      <div
-                        className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm shrink-0"
-                        style={{ background: '#FEE2E2', color: '#E30613' }}
-                      >
-                        {s.name.split(' ').map((n) => n[0]).slice(0, 2).join('')}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-sm truncate">{s.name}</p>
-                        <p className="text-xs" style={{ color: '#6B7280' }}>
-                          {cls?.level}{cls?.section} · {worst?.subject ?? ''}
-                        </p>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <p className="text-sm font-black" style={{ color: '#E30613' }}>
-                          {worst?.readinessScore?.toFixed(0) ?? '—'}%
-                        </p>
-                        <p className="text-xs" style={{ color: '#6B7280' }}>readiness</p>
-                      </div>
-                    </button>
-                  );
-                })
-              ).slice(0, 5)}
+              {atRiskStudents.map(({ student: s, subject, score, cls }) => (
+                <button
+                  key={s.id}
+                  onClick={() => router.push(`/students/${s.id}`)}
+                  className="flex items-center gap-3 p-3 rounded-xl w-full text-left"
+                  style={{ background: '#FFF5F5', border: '1.5px solid #FECACA' }}
+                >
+                  <div
+                    className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm shrink-0"
+                    style={{ background: '#FEE2E2', color: '#E30613' }}
+                  >
+                    {s.name.split(' ').map((n) => n[0]).slice(0, 2).join('')}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-sm truncate">{s.name}</p>
+                    <p className="text-xs" style={{ color: '#6B7280' }}>
+                      {cls?.level}{cls?.section} · {subject}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-sm font-black" style={{ color: '#E30613' }}>{score}%</p>
+                    <p className="text-xs" style={{ color: '#6B7280' }}>readiness</p>
+                  </div>
+                </button>
+              ))}
             </div>
           </Section>
         )}
