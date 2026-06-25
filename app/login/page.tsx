@@ -39,6 +39,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!isLoading && user) {
+      if (!localStorage.getItem('eko_onboarded_v1')) { router.replace('/onboarding'); return; }
       if (user.role === Role.TEACHER) router.replace('/dashboard');
       else if (user.role === Role.HEADTEACHER || user.role === Role.SCHOOLADMIN) router.replace('/school');
       else if (user.role === Role.DISTRICT) router.replace('/district');
